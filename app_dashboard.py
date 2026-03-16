@@ -26,7 +26,6 @@ def load_and_clean_data(file):
     time_col = next((c for c in df.columns if "time" in c.lower()), None)
     if time_col:
         df[time_col] = pd.to_datetime(df[time_col], errors='coerce')
-        # Sort by time to prevent "zigzag" lines
         df = df.sort_values(by=time_col)
     return df, time_col
 
@@ -34,7 +33,7 @@ def load_and_clean_data(file):
 col_title, col_logo = st.columns([8, 2])
 with col_title:
     st.title("Device Analysis System")
-    st.caption("Stability Analysis: Continuous Visualization Mode")
+    st.caption("Stability Analysis: Theme-Aware Visualization")
 
 with col_logo:
     if logo_base64:
@@ -48,11 +47,12 @@ if uploaded_file is not None:
     df, time_col = load_and_clean_data(uploaded_file)
     cols = df.columns.tolist()
     
+    # Updated color map for better visibility in Dark Mode
     color_map = {
-        "C1 Measurement": "#1f77b4", "C2 Measurement": "#42a5f5",
-        "T1 Measurement": "#2ca02c", "T2 Measurement": "#66bb6a",
-        "Flow Rate": "#d62728", "% Opening": "#ef5350",
-        "P1": "#ff7f0e", "P2": "#ffb74d"
+        "C1 Measurement": "#3399FF", "C2 Measurement": "#00CCFF",
+        "T1 Measurement": "#00FF66", "T2 Measurement": "#66FFB2",
+        "Flow Rate": "#FF3333", "% Opening": "#FF6666",
+        "P1": "#FF9933", "P2": "#FFCC66"
     }
 
     mupt_targets = ["C1 Measurement", "C2 Measurement", "T1 Measurement", "T2 Measurement"]
@@ -93,47 +93,45 @@ if uploaded_file is not None:
             df_filtered = df.copy()
 
         if not df_filtered.empty:
-            # 5. CALCULATIONS
             mean_val = df_filtered[plot_col].mean()
             df_filtered['PPM'] = ((df_filtered[plot_col] - mean_val) / mean_val * 1_000_000) if mean_val != 0 else 0
 
-            # --- 6. CONTINUOUS GRAPH (No White Patches) ---
-            selected_color = color_map.get(plot_col, "#1f77b4")
+            # --- 6. THEME-ADAPTIVE GRAPH ---
+            selected_color = color_map.get(plot_col, "#3399FF")
             
             fig = go.Figure()
             fig.add_trace(go.Scattergl(
                 x=df_filtered[time_col] if time_col else list(range(len(df_filtered))), 
                 y=df_filtered['PPM'], 
                 mode='lines+markers',
-                # connectgaps=True removes the "white patches" by drawing a line between points
                 connectgaps=True, 
                 marker=dict(
                     color=selected_color, 
-                    size=5,
-                    opacity=0.7
+                    size=6,
+                    line=dict(width=1, color='white') # High-contrast border for dark mode
                 ),
                 line=dict(color=selected_color, width=2),
                 name=plot_col
             ))
             
+            # --- THEME LOGIC ---
+            # Setting paper and plot bgcolor to 'rgba(0,0,0,0)' makes it transparent
             fig.update_layout(
                 title=f"<b>{plot_col} Stability Analysis</b>",
                 xaxis=dict(
                     title="Time Stamp" if time_col else "Index",
                     rangeslider=dict(visible=True),
-                    showgrid=True,
-                    gridcolor='rgba(230,230,230,0.5)'
+                    gridcolor='rgba(128,128,128,0.2)' # Subtle grid for both themes
                 ),
                 yaxis=dict(
                     title="PPM Deviation",
-                    showgrid=True,
-                    gridcolor='rgba(230,230,230,0.5)'
+                    gridcolor='rgba(128,128,128,0.2)'
                 ),
-                template="plotly_white",
-                height=550,
-                # Force plot background to be solid white to hide artifacts
-                plot_bgcolor="white",
-                paper_bgcolor="white"
+                template="plotly_dark" if st.get_option("theme.base") == "dark" else "plotly_white",
+                plot_bgcolor='rgba(0,0,0,0)', 
+                paper_bgcolor='rgba(0,0,0,0)',
+                font=dict(color=None), # Inherit from Streamlit
+                height=550
             )
             st.plotly_chart(fig, use_container_width=True)
 
