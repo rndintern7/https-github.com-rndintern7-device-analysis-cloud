@@ -17,7 +17,7 @@ logo_base64 = get_base64_image("logo.png")
 
 col_title, col_logo = st.columns([8, 2])
 with col_title:
-    st.title("☁️ Device Analysis System (Cloud)")
+    st.title("Device Analysis System ")
     st.caption("Upload Mtrol or MUPT CSV files for stability analysis.")
 
 with col_logo:
