@@ -22,7 +22,7 @@ logo_base64 = get_base64_image("logo.png")
 col_title, col_logo = st.columns([8, 2])
 with col_title:
     st.title("Device Analysis System")
-    st.caption("Cloud Analytics: Upload any CSV for automatic parameter detection.")
+    st.caption("Mtrol Analysis: Temperature-Based Stability Filtering")
 
 with col_logo:
     if logo_base64:
@@ -36,77 +36,103 @@ if uploaded_file is not None:
     df = pd.read_csv(uploaded_file)
     cols = df.columns.tolist()
     
-    # 3. AUTOMATIC PARAMETER DETECTION
-    # Define all possible target parameters
+    # 3. COLOR CONFIGURATION
+    color_map = {
+        "C1 Measurement": "#1f77b4", "C2 Measurement": "#42a5f5",
+        "T1 Measurement": "#2ca02c", "T2 Measurement": "#66bb6a",
+        "Flow Rate": "#d62728", "% Opening": "#ef5350",
+        "P1": "#ff7f0e", "P2": "#ffb74d"
+    }
+
+    # 4. PARAMETER DETECTION
     mupt_targets = ["C1 Measurement", "C2 Measurement", "T1 Measurement", "T2 Measurement"]
     mtrol_targets = ["Flow Rate", "% Opening", "P1", "P2"]
+    temp_target = "Chamber Temperature (°C)"
     
-    # Check which ones exist in the file
     found_mupt = [p for p in mupt_targets if p in cols]
     found_mtrol = [p for p in mtrol_targets if p in cols]
     
-    # Combine all found parameters for selection
-    all_found = found_mupt + found_mtrol
+    # Check if this is an Mtrol file based on existing columns
+    is_mtrol = len(found_mtrol) > 0
 
+    st.sidebar.markdown("---")
+    st.sidebar.header("⚙️ Analysis Settings")
+    
+    # Selection for what to plot
+    all_found = found_mupt + found_mtrol
     if not all_found:
-        st.error("⚠️ No standard parameters (C1, T1, Flow Rate, etc.) found in this CSV. Please check headers.")
+        st.error("⚠️ No target parameters found in CSV.")
     else:
-        st.sidebar.markdown("---")
-        st.sidebar.header("⚙️ Analysis Settings")
-        
-        # User chooses which parameter to graph
         plot_col = st.sidebar.selectbox("Select Parameter to Analyze", all_found)
 
-        # 4. DYNAMIC SLIDER FILTERS (Only for detected parameters)
+        # 5. DYNAMIC FILTERS
         st.sidebar.markdown("---")
         st.sidebar.subheader("🎯 Data Filters")
-        
         df_filtered = df.copy()
+
+        if is_mtrol and temp_target in cols:
+            # MTROL ONLY: Temperature & Tolerance (Replacing individual sliders)
+            target_temp = st.sidebar.slider("Target Chamber Temp (°C)", -40.0, 100.0, 70.0, 0.5)
+            tol = st.sidebar.slider("Tolerance (+/- °C)", 0.1, 10.0, 1.0)
+            
+            df_filtered = df_filtered[
+                (df_filtered[temp_target] >= target_temp - tol) & 
+                (df_filtered[temp_target] <= target_temp + tol)
+            ]
+            st.sidebar.info(f"Showing data where Temp is {target_temp}°C ± {tol}°C")
         
-        for p in all_found:
-            min_v, max_v = float(df[p].min()), float(df[p].max())
-            # Add sliders for every relevant parameter found in the file
-            r = st.sidebar.slider(f"Filter {p}", min_v, max_v, (min_v, max_v))
-            df_filtered = df_filtered[(df_filtered[p] >= r[0]) & (df_filtered[p] <= r[1])]
+        elif not is_mtrol:
+            # MUPT ONLY: Keep parameter sliders for C1/C2 etc.
+            for p in found_mupt:
+                min_v, max_v = float(df[p].min()), float(df[p].max())
+                r = st.sidebar.slider(f"Filter {p}", min_v, max_v, (min_v, max_v))
+                df_filtered = df_filtered[(df_filtered[p] >= r[0]) & (df_filtered[p] <= r[1])]
 
         if not df_filtered.empty:
-            # 5. CALCULATIONS
+            # 6. CALCULATIONS
             mean_val = df_filtered[plot_col].mean()
             df_filtered['PPM'] = ((df_filtered[plot_col] - mean_val) / mean_val * 1_000_000) if mean_val != 0 else 0
 
-            # --- 6. GRAPH (Sequence Index X-Axis) ---
+            # --- 7. GRAPH ---
+            selected_color = color_map.get(plot_col, "#1f77b4")
             fig = go.Figure()
             fig.add_trace(go.Scatter(
                 x=list(range(1, len(df_filtered) + 1)), 
                 y=df_filtered['PPM'], 
-                mode='lines+markers', 
-                line=dict(color="#1f77b4", width=2),
+                mode='lines+markers',
+                marker=dict(
+                    color=df_filtered['PPM'],
+                    colorscale=[[0, 'rgba(200,200,200,0.5)'], [1, selected_color]],
+                    showscale=False,
+                    size=7
+                ),
+                line=dict(color=selected_color, width=2),
                 name=plot_col
             ))
             
             fig.update_layout(
                 title=f"<b>Stability Analysis: {plot_col}</b>",
-                xaxis=dict(title="Sequence Index (Data Points)", rangeslider=dict(visible=True)),
+                xaxis=dict(title="Sequence Index (Filtered Points)", rangeslider=dict(visible=True)),
                 yaxis=dict(title="PPM Deviation"),
                 template="plotly_white",
                 height=550
             )
             st.plotly_chart(fig, use_container_width=True)
 
-            # --- 7. STATISTICS ---
+            # --- 8. STATISTICS ---
             st.markdown("### 📊 Statistics Summary")
             c1, c2, c3 = st.columns(3)
             c1.metric("Mean Value", f"{mean_val:.4f}")
             c2.metric("Peak PPM", f"{df_filtered['PPM'].max():.2f}")
             c3.metric("Min PPM", f"{df_filtered['PPM'].min():.2f}")
 
-            # --- 8. DATA TABLE ---
+            # --- 9. DATA TABLE ---
             st.subheader("📋 Filtered Results")
-            table_cols = all_found + ['PPM']
-            st.dataframe(df_filtered[table_cols], use_container_width=True, hide_index=False)
+            display_cols = all_found + ( [temp_target] if temp_target in cols else [] ) + ['PPM']
+            st.dataframe(df_filtered[display_cols], use_container_width=True)
 
         else:
-            st.warning("No data matches the selected filter ranges.")
+            st.warning("⚠️ No data matches the selected Temperature range.")
 
 else:
-    st.info("👋 Welcome! Please upload your CSV file in the sidebar to begin. The system will automatically detect if it is an Mtrol or MUPT dataset.")
+    st.info("👋 Upload an Mtrol CSV to filter by Chamber Temperature and Tolerance.")
