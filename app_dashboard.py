@@ -33,7 +33,7 @@ def load_and_clean_data(file):
 col_title, col_logo = st.columns([8, 2])
 with col_title:
     st.title("Device Analysis System")
-    st.caption("Precision Stability Analytics")
+    st.caption("Precision Stability & Statistics Dashboard")
 
 with col_logo:
     if logo_base64:
@@ -67,7 +67,6 @@ if uploaded_file is not None:
     found_mupt = [p for p in mupt_plot_only if p in cols]
     found_mtrol = [p for p in mtrol_targets if p in cols]
 
-    # Device Detection
     if found_mtrol:
         device_name = "Mtrol 4" if "MT4" in uploaded_file.name.upper() else "Mtrol 3"
     else:
@@ -105,17 +104,21 @@ if uploaded_file is not None:
                     df_filtered = df_filtered[(df_filtered[p] >= r[0]) & (df_filtered[p] <= r[1])]
 
         if not df_filtered.empty:
-            # Calculation logic
+            # --- 5. CALCULATIONS ---
             is_numeric = pd.api.types.is_numeric_dtype(df_filtered[plot_col])
-            mean_val = df_filtered[plot_col].mean() if is_numeric else 0
             
-            if is_numeric and mean_val != 0:
-                df_filtered['PPM'] = ((df_filtered[plot_col] - mean_val) / mean_val * 1_000_000)
+            # Raw Statistics
+            raw_min = df_filtered[plot_col].min()
+            raw_max = df_filtered[plot_col].max()
+            raw_avg = df_filtered[plot_col].mean() if is_numeric else 0
+            
+            if is_numeric and raw_avg != 0:
+                df_filtered['PPM'] = ((df_filtered[plot_col] - raw_avg) / raw_avg * 1_000_000)
                 y_col, y_label = 'PPM', "PPM Deviation"
             else:
                 y_col, y_label = plot_col, "Value/Status"
 
-            # --- PLOT ---
+            # --- 6. PLOT ---
             selected_color = color_map.get(plot_col, "#FFFFFF")
             bg_color = "#0e1117" 
             grid_color = "#31333f"
@@ -146,14 +149,29 @@ if uploaded_file is not None:
             )
             st.plotly_chart(fig, use_container_width=True)
 
-            # --- 8. DATA TABLE WITH S.No. ---
-            st.markdown("### 📋 Filtered Results")
+            # --- 7. STATISTICS SUMMARY ---
+            st.markdown("### 📊 Statistics Summary")
             
-            # Resetting index to create the S.No. column
+            # Row 1: Raw Values
+            st.write("**Measurement Statistics**")
+            r1_c1, r1_c2, r1_c3 = st.columns(3)
+            r1_c1.metric("Min Value", f"{raw_min:.4f}" if is_numeric else str(raw_min))
+            r1_c2.metric("Max Value", f"{raw_max:.4f}" if is_numeric else str(raw_max))
+            r1_c3.metric("Average Value", f"{raw_avg:.4f}" if is_numeric else "N/A")
+
+            # Row 2: Stability Values (PPM)
+            if is_numeric and raw_avg != 0:
+                st.write("**Stability (PPM) Statistics**")
+                r2_c1, r2_c2, r2_c3 = st.columns(3)
+                r2_c1.metric("Min PPM", f"{df_filtered['PPM'].min():.2f}")
+                r2_c2.metric("Max PPM", f"{df_filtered['PPM'].max():.2f}")
+                r2_c3.metric("Avg PPM", "0.00") # Average of deviation is always near 0
+
+            # --- 8. DATA TABLE WITH S.No. ---
+            st.markdown("---")
+            st.markdown("### 📋 Filtered Results")
             df_display = df_filtered.copy()
             df_display.insert(0, 'S.No.', range(1, len(df_display) + 1))
-            
-            # Displaying the table without the default Streamlit index
             st.dataframe(df_display.head(1000), use_container_width=True, hide_index=True)
 
         else:
