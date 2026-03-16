@@ -5,19 +5,26 @@ import base64
 import os
 
 # 1. Page Config
-st.set_page_config(page_title="Device Analysis System", layout="wide")
+st.set_page_config(page_title="Mtrol Precision Analytics", layout="wide")
 
-# --- Logo Loader ---
-@st.cache_data
-def get_base64_image(image_path):
+# --- Function to fetch Standard Values based on Device and Parameter ---
+def get_mtrol_standards(device_name, parameter_name):
+    # Mapping to your uploaded standard files
+    file_map = {
+        "Mtrol 3": "Standard Values 11-13 March - For Mtrol 3 Input.csv",
+        "Mtrol 4": "Standard Values 11-13 March - For Mtrol 4 Input.csv"
+    }
+    
     try:
-        if os.path.exists(image_path):
-            with open(image_path, "rb") as img_file:
-                return base64.b64encode(img_file.read()).decode()
-        return ""
-    except: return ""
-
-logo_base64 = get_base64_image("logo.png")
+        if device_name in file_map and os.path.exists(file_map[device_name]):
+            std_df = pd.read_csv(file_map[device_name])
+            # Match parameter name (e.g., "P1" matches "P1 (bar)")
+            match = std_df[std_df['Parameters'].str.contains(parameter_name.split(' ')[0], case=False)]
+            if not match.empty:
+                return float(match.iloc[0]['Minimum Value']), float(match.iloc[0]['Maximum Value'])
+    except Exception as e:
+        st.error(f"Error loading standards: {e}")
+    return None, None
 
 # --- Cached Data Loading ---
 @st.cache_data
@@ -30,168 +37,106 @@ def load_and_clean_data(file):
     return df, time_col
 
 # --- HEADER ---
-col_title, col_logo = st.columns([8, 2])
-with col_title:
-    st.title("Device Analysis System")
-    st.caption("Custom PPM Formula Mode: Mtrol Valve Analysis")
+st.title("Mtrol Precision Analytics")
+st.caption("Standardized PPM Formula Engine")
 
-with col_logo:
-    if logo_base64:
-        st.markdown(f'<div style="text-align:right;"><img src="data:image/png;base64,{logo_base64}" style="width:180px;"></div>', unsafe_allow_html=True)
-
-# --- 3. DATA SOURCE ---
+# --- DATA SOURCE ---
 st.sidebar.header("📂 Data Source")
-uploaded_file = st.sidebar.file_uploader("Upload Dataset (CSV)", type=["csv"])
+uploaded_file = st.sidebar.file_uploader("Upload Mtrol Dataset (CSV)", type=["csv"])
 
 if uploaded_file is not None:
     df, time_col = load_and_clean_data(uploaded_file)
     cols = df.columns.tolist()
     
-    # 14 UNIQUE COLORS
+    # 14 Color Palette
     color_map = {
-        "C1 Measurement": "#00CCFF", "C2 Measurement": "#33FFFF",
-        "T1 Measurement": "#00FF99", "T2 Measurement": "#99FFCC",
-        "Trap Mode": "#FF00FF", "Bypass Mode": "#FF66FF",
-        "Solenoid Status": "#FFFF00", "Steam Leak": "#FFCC00",
-        "Water Log/Process Off": "#FF9900", "Cooling Cycle Switch": "#00FFFF",
-        "Flow Rate": "#FF4B4B", "% Opening": "#FF8F8F",
-        "P1": "#A64DFF", "P2": "#D9B3FF"
+        "Flow Rate": "#FF4B4B", "% Opening": "#FF8F8F", 
+        "P1": "#A64DFF", "P2": "#D9B3FF",
+        "C1 Measurement": "#00CCFF", "C2 Measurement": "#33FFFF"
     }
 
-    mupt_plot_only = ["C1 Measurement", "C2 Measurement", "T1 Measurement", "T2 Measurement",
-                      "Trap Mode", "Bypass Mode", "Solenoid Status", "Steam Leak",
-                      "Water Log/Process Off", "Cooling Cycle Switch"]
-    mtrol_targets = ["Flow Rate", "% Opening", "P1", "P2"]
+    mtrol_params = ["Flow Rate", "% Opening", "P1", "P2"]
     temp_target = "Chamber Temperature (°C)"
     
-    found_mupt = [p for p in mupt_plot_only if p in cols]
-    found_mtrol = [p for p in mtrol_targets if p in cols]
+    # Device Identification Logic
+    device_name = "Mtrol 4" if "MT4" in uploaded_file.name.upper() else "Mtrol 3"
+    st.sidebar.success(f"Mode: {device_name}")
 
-    if found_mtrol:
-        device_name = "Mtrol 4" if "MT4" in uploaded_file.name.upper() else "Mtrol 3"
-    else:
-        device_name = "MUPT"
+    plot_col = st.sidebar.selectbox("Select Parameter", [c for c in mtrol_params if c in cols])
 
-    all_plot_params = found_mupt + found_mtrol
-
+    # --- FILTERS ---
     st.sidebar.markdown("---")
-    st.sidebar.header("⚙️ Settings")
-    
-    if not all_plot_params:
-        st.error("⚠️ No target parameters detected.")
-    else:
-        plot_col = st.sidebar.selectbox("Select Parameter", all_plot_params)
+    st.sidebar.subheader("🎯 Temperature Filter")
+    df_filtered = df.copy()
+    filter_text = "All Data"
 
-        # 4. FILTERS
-        st.sidebar.markdown("---")
-        st.sidebar.subheader("🎯 Data Filters")
-        df_filtered = df.copy()
-        filter_text = "All Data"
+    if temp_target in cols:
+        target_temp = st.sidebar.slider("Target Temp (°C)", -40.0, 100.0, 70.0, 0.5)
+        tol = st.sidebar.slider("Tolerance (+/- °C)", 0.1, 10.0, 1.0)
+        df_filtered = df[(df[temp_target] >= target_temp - tol) & (df[temp_target] <= target_temp + tol)].copy()
+        filter_text = f"Temp: {target_temp}°C | Tolerance: ±{tol}°C"
 
-        if "Mtrol" in device_name and temp_target in cols:
-            target_temp = st.sidebar.slider("Target Chamber Temp (°C)", -40.0, 100.0, 70.0, 0.5)
-            tol = st.sidebar.slider("Tolerance (+/- °C)", 0.1, 10.0, 1.0)
-            df_filtered = df[(df[temp_target] >= target_temp - tol) & (df[temp_target] <= target_temp + tol)].copy()
-            filter_text = f"Temp: {target_temp}°C | Tolerance: ±{tol}°C"
+    if not df_filtered.empty:
+        # --- DYNAMIC PPM CALCULATION ---
+        is_numeric = pd.api.types.is_numeric_dtype(df_filtered[plot_col])
+        param_avg = df_filtered[plot_col].mean() if is_numeric else 0
+        
+        formula_ppm = 0
+        std_min, std_max = get_mtrol_standards(device_name, plot_col)
+
+        if std_min is not None and std_max is not None and temp_target in cols:
+            # 1. Input Min/Max from filtered data
+            input_max = df_filtered[plot_col].max()
+            input_min = df_filtered[plot_col].min()
+            
+            # 2. Chamber Temp Min/Max from filtered data
+            temp_max = df_filtered[temp_target].max()
+            temp_min = df_filtered[temp_target].min()
+            
+            temp_range = temp_max - temp_min
+            std_range = std_max - std_min
+            
+            # 3. Applying your NEW formula:
+            # PPM = ([Max Input - Min Input] * 1,000,000) / ([Max Temp - Min Temp] * [Std Max - Std Min])
+            if temp_range != 0 and std_range != 0:
+                formula_ppm = ((input_max - input_min) * 1000000) / (temp_range * std_range)
+
+        # Graph Data (PPM Deviation from Average for trend view)
+        if is_numeric and param_avg != 0:
+            df_filtered['PPM_Dev'] = ((df_filtered[plot_col] - param_avg) / param_avg * 1_000_000)
+            y_col = 'PPM_Dev'
         else:
-            mupt_slider_targets = ["C1 Measurement", "C2 Measurement", "T1 Measurement", "T2 Measurement"]
-            found_sliders = [p for p in mupt_slider_targets if p in cols]
-            if found_sliders:
-                filter_text = "Range Filtered"
-                for p in found_sliders:
-                    min_v, max_v = float(df[p].min()), float(df[p].max())
-                    r = st.sidebar.slider(f"Filter {p}", min_v, max_v, (min_v, max_v))
-                    df_filtered = df_filtered[(df_filtered[p] >= r[0]) & (df_filtered[p] <= r[1])]
+            y_col = plot_col
 
-        if not df_filtered.empty:
-            # --- 5. CALCULATIONS ---
-            is_numeric = pd.api.types.is_numeric_dtype(df_filtered[plot_col])
-            param_avg = df_filtered[plot_col].mean() if is_numeric else 0
-            
-            ppm_min, ppm_max = 0, 0
-            
-            if is_numeric:
-                # NEW FORMULA FOR MTROL % OPENING
-                if device_name in ["Mtrol 3", "Mtrol 4"] and plot_col == "% Opening" and temp_target in cols:
-                    max_valve = df_filtered["% Opening"].max()
-                    min_valve = df_filtered["% Opening"].min()
-                    max_temp = df_filtered[temp_target].max()
-                    min_temp = df_filtered[temp_target].min()
-                    
-                    temp_range = max_temp - min_temp
-                    
-                    # Prevent Division by Zero
-                    if temp_range != 0:
-                        # Applying the formula: PPM = ((MaxValve - MinValve) * 1,000,000) / (TempRange * 100)
-                        calculated_ppm = ((max_valve - min_valve) * 1000000) / (temp_range * 100)
-                        
-                        # In this case, the PPM is a single static value for the selected window.
-                        # To visualize it as a stability line, we show the deviation from current avg.
-                        df_filtered['PPM'] = ((df_filtered[plot_col] - param_avg) / param_avg * 1_000_000) if param_avg != 0 else 0
-                        
-                        # Use the formula result for the Min/Max metrics specifically
-                        ppm_min = calculated_ppm # Displaying the formula result
-                        ppm_max = calculated_ppm
-                    else:
-                        df_filtered['PPM'] = 0
-                
-                # STANDARD LOGIC FOR OTHERS
-                elif param_avg != 0:
-                    df_filtered['PPM'] = ((df_filtered[plot_col] - param_avg) / param_avg * 1_000_000)
-                    ppm_min = df_filtered['PPM'].min()
-                    ppm_max = df_filtered['PPM'].max()
-                
-                y_col, y_label = 'PPM', "PPM Deviation"
-            else:
-                y_col, y_label = plot_col, "Value/Status"
+        # --- PLOT ---
+        fig = go.Figure()
+        fig.add_trace(go.Scattergl(
+            x=df_filtered[time_col], y=df_filtered[y_col], 
+            mode='lines+markers', marker=dict(color=color_map.get(plot_col, "#FFFFFF"), size=4),
+            line=dict(width=1.5), name=plot_col
+        ))
+        
+        fig.update_layout(
+            template="plotly_dark", height=550,
+            annotations=[{
+                "x": 1, "y": 1.1, "xref": "paper", "yref": "paper",
+                "text": f"Device: {device_name} | Filter: {filter_text}",
+                "showarrow": False, "bgcolor": "rgba(50,50,50,0.8)", "bordercolor": "#FF4B4B", "borderwidth": 1
+            }]
+        )
+        st.plotly_chart(fig, use_container_width=True)
 
-            # --- 6. PLOT ---
-            selected_color = color_map.get(plot_col, "#FFFFFF")
-            bg_color = "#0e1117" 
-            grid_color = "#31333f"
+        # --- STATISTICS ---
+        st.markdown("### 📊 Metrics Summary")
+        m1, m2, m3 = st.columns(3)
+        m1.metric(f"Avg {plot_col}", f"{param_avg:.4f}")
+        m2.metric("New Formula PPM", f"{formula_ppm:.2f}")
+        m3.info(f"Using Standard Range: {std_min} to {std_max}")
 
-            fig = go.Figure()
-            fig.add_trace(go.Scattergl(
-                x=df_filtered[time_col], y=df_filtered[y_col], 
-                mode='lines+markers', connectgaps=True,
-                marker=dict(color=selected_color, size=4),
-                line=dict(color=selected_color, width=1.5),
-                name=plot_col
-            ))
-            
-            fig.update_layout(
-                title=f"<b>{plot_col} Analysis</b>",
-                xaxis=dict(title="Time Stamp", gridcolor=grid_color,
-                           rangeslider=dict(visible=True, bgcolor=bg_color, thickness=0.1, bordercolor=grid_color)),
-                yaxis=dict(title=y_label, gridcolor=grid_color, zeroline=False),
-                template="plotly_dark",
-                plot_bgcolor=bg_color, paper_bgcolor=bg_color,
-                height=600,
-                annotations=[{
-                    "x": 1, "y": 1.12, "xref": "paper", "yref": "paper",
-                    "text": f"Device: {device_name} | Filter: {filter_text}",
-                    "showarrow": False, "font": {"size": 13, "color": "white"},
-                    "bgcolor": "rgba(49, 51, 63, 0.9)", "bordercolor": "#FF4B4B", "borderwidth": 1
-                }]
-            )
-            st.plotly_chart(fig, use_container_width=True)
-
-            # --- 7. STATISTICS SUMMARY ---
-            st.markdown("### 📊 Calculated Metrics")
-            c1, c2, c3 = st.columns(3)
-            
-            if is_numeric:
-                c1.metric(f"Avg of {plot_col}", f"{param_avg:.4f}")
-                
-                if plot_col == "% Opening":
-                    c2.metric("Formula PPM", f"{ppm_min:.2f}")
-                    c3.metric("Valve Range", f"{(max_valve - min_valve):.2f}%")
-                else:
-                    c2.metric("Min PPM (Graph)", f"{ppm_min:.2f}")
-                    c3.metric("Max PPM (Graph)", f"{ppm_max:.2f}")
-
-            # --- 8. DATA TABLE ---
-            st.markdown("---")
-            df_display = df_filtered.copy()
-            df_display.insert(0, 'S.No.', range(1, len(df_display) + 1))
-            st.dataframe(df_display.head(1000), use_container_width=True, hide_index=True)
+        # --- DATA TABLE WITH S.No. ---
+        st.markdown("### 📋 Data Preview")
+        df_display = df_filtered.copy()
+        df_display.insert(0, 'S.No.', range(1, len(df_display) + 1))
+        st.dataframe(df_display.head(1000), use_container_width=True, hide_index=True)
+    else:
+        st.warning("No data found for the selected temperature range.")
