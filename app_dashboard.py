@@ -33,7 +33,7 @@ def load_and_clean_data(file):
 col_title, col_logo = st.columns([8, 2])
 with col_title:
     st.title("Device Analysis System")
-    st.caption("MUPT & Mtrol Analytics Dashboard")
+    st.caption("Specific Device Analytics Dashboard")
 
 with col_logo:
     if logo_base64:
@@ -47,7 +47,7 @@ if uploaded_file is not None:
     df, time_col = load_and_clean_data(uploaded_file)
     cols = df.columns.tolist()
     
-    # --- 14 UNIQUE COLORS ---
+    # 14 UNIQUE COLORS
     color_map = {
         "C1 Measurement": "#00CCFF", "C2 Measurement": "#33FFFF",
         "T1 Measurement": "#00FF99", "T2 Measurement": "#99FFCC",
@@ -58,6 +58,7 @@ if uploaded_file is not None:
         "P1": "#A64DFF", "P2": "#D9B3FF"
     }
 
+    # Parameters
     mupt_plot_only = ["C1 Measurement", "C2 Measurement", "T1 Measurement", "T2 Measurement",
                       "Trap Mode", "Bypass Mode", "Solenoid Status", "Steam Leak",
                       "Water Log/Process Off", "Cooling Cycle Switch"]
@@ -66,8 +67,20 @@ if uploaded_file is not None:
     
     found_mupt = [p for p in mupt_plot_only if p in cols]
     found_mtrol = [p for p in mtrol_targets if p in cols]
-    
-    device_name = "MUPT" if len(found_mupt) > len(found_mtrol) else "Mtrol 3/4"
+
+    # --- DYNAMIC DEVICE DETECTION ---
+    # Customize this logic based on how your headers differ between Mtrol 3 and 4
+    if found_mtrol:
+        # Example logic: if a specific column exists for 4, use 4, else 3
+        if "Device ID" in cols and "Mtrol 4" in str(df["Device ID"].iloc[0]):
+            device_name = "Mtrol 4"
+        elif "MT4" in uploaded_file.name: # Or check file name
+            device_name = "Mtrol 4"
+        else:
+            device_name = "Mtrol 3"
+    else:
+        device_name = "MUPT"
+
     all_plot_params = found_mupt + found_mtrol
 
     st.sidebar.markdown("---")
@@ -84,7 +97,7 @@ if uploaded_file is not None:
         df_filtered = df.copy()
         filter_text = "All Data"
 
-        if device_name == "Mtrol 3/4" and temp_target in cols:
+        if "Mtrol" in device_name and temp_target in cols:
             target_temp = st.sidebar.slider("Target Chamber Temp (°C)", -40.0, 100.0, 70.0, 0.5)
             tol = st.sidebar.slider("Tolerance (+/- °C)", 0.1, 10.0, 1.0)
             df_filtered = df[(df[temp_target] >= target_temp - tol) & (df[temp_target] <= target_temp + tol)].copy()
@@ -100,7 +113,6 @@ if uploaded_file is not None:
                     df_filtered = df_filtered[(df_filtered[p] >= r[0]) & (df_filtered[p] <= r[1])]
 
         if not df_filtered.empty:
-            # 5. PPM LOGIC
             is_numeric = pd.api.types.is_numeric_dtype(df_filtered[plot_col])
             mean_val = df_filtered[plot_col].mean() if is_numeric else 0
             
@@ -110,7 +122,7 @@ if uploaded_file is not None:
             else:
                 y_col, y_label = plot_col, "Value/Status"
 
-            # --- 6. PLOT ---
+            # --- PLOT ---
             selected_color = color_map.get(plot_col, "#FFFFFF")
             bg_color = "#0e1117" 
             grid_color = "#31333f"
@@ -124,7 +136,6 @@ if uploaded_file is not None:
                 name=plot_col
             ))
             
-            # --- FIX FOR VALUE ERROR (Clean Annotation) ---
             fig.update_layout(
                 title=f"<b>{plot_col} Analysis</b>",
                 xaxis=dict(title="Time Stamp", gridcolor=grid_color,
@@ -133,7 +144,6 @@ if uploaded_file is not None:
                 template="plotly_dark",
                 plot_bgcolor=bg_color, paper_bgcolor=bg_color,
                 height=600,
-                # Using list of dicts for annotations correctly
                 annotations=[{
                     "x": 1, "y": 1.1, 
                     "xref": "paper", "yref": "paper",
@@ -149,15 +159,13 @@ if uploaded_file is not None:
             
             st.plotly_chart(fig, use_container_width=True)
 
-            # --- 7. STATISTICS ---
+            # STATISTICS
             st.markdown("### 📊 Statistics Summary")
             c1, c2, c3 = st.columns(3)
             if is_numeric and mean_val != 0:
                 c1.metric("Mean Value", f"{mean_val:.4f}")
                 c2.metric("Peak PPM", f"{df_filtered['PPM'].max():.2f}")
                 c3.metric("Min PPM", f"{df_filtered['PPM'].min():.2f}")
-            else:
-                c1.info("Status Parameter: No PPM calculated.")
 
             st.dataframe(df_filtered.head(500), use_container_width=True)
         else:
