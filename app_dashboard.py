@@ -7,7 +7,7 @@ import os
 # 1. Page Config
 st.set_page_config(page_title="Device Analysis System", layout="wide")
 
-# --- Function to load logo (Cached) ---
+# --- Function to load logo ---
 @st.cache_data
 def get_base64_image(image_path):
     try:
@@ -33,7 +33,7 @@ def load_and_clean_data(file):
 col_title, col_logo = st.columns([8, 2])
 with col_title:
     st.title("Device Analysis System")
-    st.caption("Stability Analysis: Theme-Aware Visualization")
+    st.caption("Clean Visualization Mode: No Artifacts")
 
 with col_logo:
     if logo_base64:
@@ -47,12 +47,12 @@ if uploaded_file is not None:
     df, time_col = load_and_clean_data(uploaded_file)
     cols = df.columns.tolist()
     
-    # Updated color map for better visibility in Dark Mode
+    # High-contrast colors for Dark Mode
     color_map = {
-        "C1 Measurement": "#3399FF", "C2 Measurement": "#00CCFF",
-        "T1 Measurement": "#00FF66", "T2 Measurement": "#66FFB2",
-        "Flow Rate": "#FF3333", "% Opening": "#FF6666",
-        "P1": "#FF9933", "P2": "#FFCC66"
+        "C1 Measurement": "#00CCFF", "C2 Measurement": "#33FFFF",
+        "T1 Measurement": "#00FF99", "T2 Measurement": "#99FFCC",
+        "Flow Rate": "#FF4B4B", "% Opening": "#FF8F8F",
+        "P1": "#FFAA00", "P2": "#FFD480"
     }
 
     mupt_targets = ["C1 Measurement", "C2 Measurement", "T1 Measurement", "T2 Measurement"]
@@ -65,12 +65,12 @@ if uploaded_file is not None:
     all_found = found_mupt + found_mtrol
 
     st.sidebar.markdown("---")
-    st.sidebar.header("⚙️ Analysis Settings")
+    st.sidebar.header("⚙️ Settings")
     
     if not all_found:
-        st.error("⚠️ No target parameters found.")
+        st.error("⚠️ No target parameters detected.")
     else:
-        plot_col = st.sidebar.selectbox("Select Parameter to Analyze", all_found)
+        plot_col = st.sidebar.selectbox("Select Parameter", all_found)
 
         # 4. FILTERS
         st.sidebar.markdown("---")
@@ -79,60 +79,57 @@ if uploaded_file is not None:
         if is_mtrol and temp_target in cols:
             target_temp = st.sidebar.slider("Target Chamber Temp (°C)", -40.0, 100.0, 70.0, 0.5)
             tol = st.sidebar.slider("Tolerance (+/- °C)", 0.1, 10.0, 1.0)
-            df_filtered = df[
-                (df[temp_target] >= target_temp - tol) & 
-                (df[temp_target] <= target_temp + tol)
-            ].copy()
-        elif not is_mtrol:
+            df_filtered = df[(df[temp_target] >= target_temp - tol) & (df[temp_target] <= target_temp + tol)].copy()
+        else:
             df_filtered = df.copy()
             for p in found_mupt:
                 min_v, max_v = float(df[p].min()), float(df[p].max())
                 r = st.sidebar.slider(f"Filter {p}", min_v, max_v, (min_v, max_v))
                 df_filtered = df_filtered[(df_filtered[p] >= r[0]) & (df_filtered[p] <= r[1])]
-        else:
-            df_filtered = df.copy()
 
         if not df_filtered.empty:
             mean_val = df_filtered[plot_col].mean()
             df_filtered['PPM'] = ((df_filtered[plot_col] - mean_val) / mean_val * 1_000_000) if mean_val != 0 else 0
 
-            # --- 6. THEME-ADAPTIVE GRAPH ---
-            selected_color = color_map.get(plot_col, "#3399FF")
+            # --- 6. CLEAN GRAPH (No WebGL, No Rangeslider) ---
+            selected_color = color_map.get(plot_col, "#00CCFF")
             
             fig = go.Figure()
-            fig.add_trace(go.Scattergl(
+            # go.Scatter is smoother/cleaner than go.Scattergl for artifact-free viewing
+            fig.add_trace(go.Scatter(
                 x=df_filtered[time_col] if time_col else list(range(len(df_filtered))), 
                 y=df_filtered['PPM'], 
                 mode='lines+markers',
-                connectgaps=True, 
-                marker=dict(
-                    color=selected_color, 
-                    size=6,
-                    line=dict(width=1, color='white') # High-contrast border for dark mode
-                ),
+                connectgaps=True,
+                marker=dict(color=selected_color, size=5),
                 line=dict(color=selected_color, width=2),
                 name=plot_col
             ))
             
-            # --- THEME LOGIC ---
-            # Setting paper and plot bgcolor to 'rgba(0,0,0,0)' makes it transparent
+            # Match Streamlit Dark Theme precisely
+            bg_color = "#0e1117" 
+            grid_color = "#31333f"
+
             fig.update_layout(
-                title=f"<b>{plot_col} Stability Analysis</b>",
+                title=f"<b>{plot_col} Stability</b>",
                 xaxis=dict(
                     title="Time Stamp" if time_col else "Index",
-                    rangeslider=dict(visible=True),
-                    gridcolor='rgba(128,128,128,0.2)' # Subtle grid for both themes
+                    gridcolor=grid_color,
+                    zeroline=False,
+                    rangeslider=dict(visible=False) # Rangeslider often causes white patches
                 ),
                 yaxis=dict(
                     title="PPM Deviation",
-                    gridcolor='rgba(128,128,128,0.2)'
+                    gridcolor=grid_color,
+                    zeroline=False
                 ),
-                template="plotly_dark" if st.get_option("theme.base") == "dark" else "plotly_white",
-                plot_bgcolor='rgba(0,0,0,0)', 
-                paper_bgcolor='rgba(0,0,0,0)',
-                font=dict(color=None), # Inherit from Streamlit
+                template="plotly_dark",
+                plot_bgcolor=bg_color,
+                paper_bgcolor=bg_color,
+                margin=dict(l=40, r=40, t=60, b=40),
                 height=550
             )
+            
             st.plotly_chart(fig, use_container_width=True)
 
             # --- 7. STATISTICS ---
@@ -142,9 +139,7 @@ if uploaded_file is not None:
             c2.metric("Peak PPM", f"{df_filtered['PPM'].max():.2f}")
             c3.metric("Min PPM", f"{df_filtered['PPM'].min():.2f}")
 
-            # --- 8. DATA TABLE ---
-            st.subheader("📋 Filtered Results")
-            st.dataframe(df_filtered.head(1000), use_container_width=True)
-
+            st.subheader("📋 Data Preview")
+            st.dataframe(df_filtered.head(500), use_container_width=True)
         else:
-            st.warning("⚠️ No data matches the selected filter range.")
+            st.warning("⚠️ No data in selected range.")
