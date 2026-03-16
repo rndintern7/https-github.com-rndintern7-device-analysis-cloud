@@ -33,7 +33,7 @@ def load_and_clean_data(file):
 col_title, col_logo = st.columns([8, 2])
 with col_title:
     st.title("Device Analysis System")
-    st.caption("Precision Stability & Statistics Dashboard")
+    st.caption("PPM Stability & Parameter Average Analytics")
 
 with col_logo:
     if logo_base64:
@@ -47,7 +47,7 @@ if uploaded_file is not None:
     df, time_col = load_and_clean_data(uploaded_file)
     cols = df.columns.tolist()
     
-    # --- 14 UNIQUE COLORS ---
+    # 14 UNIQUE COLORS
     color_map = {
         "C1 Measurement": "#00CCFF", "C2 Measurement": "#33FFFF",
         "T1 Measurement": "#00FF99", "T2 Measurement": "#99FFCC",
@@ -67,6 +67,7 @@ if uploaded_file is not None:
     found_mupt = [p for p in mupt_plot_only if p in cols]
     found_mtrol = [p for p in mtrol_targets if p in cols]
 
+    # Device Detection
     if found_mtrol:
         device_name = "Mtrol 4" if "MT4" in uploaded_file.name.upper() else "Mtrol 3"
     else:
@@ -107,15 +108,18 @@ if uploaded_file is not None:
             # --- 5. CALCULATIONS ---
             is_numeric = pd.api.types.is_numeric_dtype(df_filtered[plot_col])
             
-            # Raw Statistics
-            raw_min = df_filtered[plot_col].min()
-            raw_max = df_filtered[plot_col].max()
-            raw_avg = df_filtered[plot_col].mean() if is_numeric else 0
+            # 1. Parameter Average (Raw Value)
+            param_avg = df_filtered[plot_col].mean() if is_numeric else 0
             
-            if is_numeric and raw_avg != 0:
-                df_filtered['PPM'] = ((df_filtered[plot_col] - raw_avg) / raw_avg * 1_000_000)
+            if is_numeric and param_avg != 0:
+                # 2. PPM Calculation
+                df_filtered['PPM'] = ((df_filtered[plot_col] - param_avg) / param_avg * 1_000_000)
+                # 3. PPM Min/Max
+                ppm_min = df_filtered['PPM'].min()
+                ppm_max = df_filtered['PPM'].max()
                 y_col, y_label = 'PPM', "PPM Deviation"
             else:
+                ppm_min, ppm_max = 0, 0
                 y_col, y_label = plot_col, "Value/Status"
 
             # --- 6. PLOT ---
@@ -150,29 +154,24 @@ if uploaded_file is not None:
             st.plotly_chart(fig, use_container_width=True)
 
             # --- 7. STATISTICS SUMMARY ---
-            st.markdown("### 📊 Statistics Summary")
+            st.markdown("### 📊 Calculated Metrics")
+            c1, c2, c3 = st.columns(3)
             
-            # Row 1: Raw Values
-            st.write("**Measurement Statistics**")
-            r1_c1, r1_c2, r1_c3 = st.columns(3)
-            r1_c1.metric("Min Value", f"{raw_min:.4f}" if is_numeric else str(raw_min))
-            r1_c2.metric("Max Value", f"{raw_max:.4f}" if is_numeric else str(raw_max))
-            r1_c3.metric("Average Value", f"{raw_avg:.4f}" if is_numeric else "N/A")
-
-            # Row 2: Stability Values (PPM)
-            if is_numeric and raw_avg != 0:
-                st.write("**Stability (PPM) Statistics**")
-                r2_c1, r2_c2, r2_c3 = st.columns(3)
-                r2_c1.metric("Min PPM", f"{df_filtered['PPM'].min():.2f}")
-                r2_c2.metric("Max PPM", f"{df_filtered['PPM'].max():.2f}")
-                r2_c3.metric("Avg PPM", "0.00") # Average of deviation is always near 0
+            if is_numeric:
+                # Average of Parameter Selected
+                c1.metric(f"Avg of {plot_col}", f"{param_avg:.4f}")
+                # Min/Max of PPM according to Graph
+                c2.metric("Min PPM (Graph)", f"{ppm_min:.2f}")
+                c3.metric("Max PPM (Graph)", f"{ppm_max:.2f}")
+            else:
+                c1.info("Status-based parameter: Average/PPM not applicable.")
 
             # --- 8. DATA TABLE WITH S.No. ---
             st.markdown("---")
-            st.markdown("### 📋 Filtered Results")
+            st.markdown("### 📋 Filtered Data Preview")
             df_display = df_filtered.copy()
             df_display.insert(0, 'S.No.', range(1, len(df_display) + 1))
             st.dataframe(df_display.head(1000), use_container_width=True, hide_index=True)
 
         else:
-            st.warning("⚠️ No data matches filters.")
+            st.warning("⚠️ No data matches the selected filters.")
