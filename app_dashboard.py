@@ -33,7 +33,7 @@ def load_and_clean_data(file):
 col_title, col_logo = st.columns([8, 2])
 with col_title:
     st.title("Device Analysis System")
-    st.caption("Clean Visualization Mode: No Artifacts")
+    st.caption("Stability Analysis: Dark Theme with Styled Rangeslider")
 
 with col_logo:
     if logo_base64:
@@ -91,11 +91,10 @@ if uploaded_file is not None:
             mean_val = df_filtered[plot_col].mean()
             df_filtered['PPM'] = ((df_filtered[plot_col] - mean_val) / mean_val * 1_000_000) if mean_val != 0 else 0
 
-            # --- 6. CLEAN GRAPH (No WebGL, No Rangeslider) ---
+            # --- 6. GRAPH WITH STYLED RANGESLIDER ---
             selected_color = color_map.get(plot_col, "#00CCFF")
             
             fig = go.Figure()
-            # go.Scatter is smoother/cleaner than go.Scattergl for artifact-free viewing
             fig.add_trace(go.Scatter(
                 x=df_filtered[time_col] if time_col else list(range(len(df_filtered))), 
                 y=df_filtered['PPM'], 
@@ -106,17 +105,24 @@ if uploaded_file is not None:
                 name=plot_col
             ))
             
-            # Match Streamlit Dark Theme precisely
+            # Dark Theme Colors
             bg_color = "#0e1117" 
             grid_color = "#31333f"
 
             fig.update_layout(
-                title=f"<b>{plot_col} Stability</b>",
+                title=f"<b>{plot_col} Stability Analysis</b>",
                 xaxis=dict(
                     title="Time Stamp" if time_col else "Index",
                     gridcolor=grid_color,
                     zeroline=False,
-                    rangeslider=dict(visible=False) # Rangeslider often causes white patches
+                    # --- STYLED RANGESLIDER ---
+                    rangeslider=dict(
+                        visible=True,
+                        bgcolor=bg_color, # Match dashboard background
+                        thickness=0.08,   # Slimmer slider
+                        bordercolor=grid_color,
+                        borderwidth=1
+                    )
                 ),
                 yaxis=dict(
                     title="PPM Deviation",
@@ -127,7 +133,7 @@ if uploaded_file is not None:
                 plot_bgcolor=bg_color,
                 paper_bgcolor=bg_color,
                 margin=dict(l=40, r=40, t=60, b=40),
-                height=550
+                height=600 # Slightly taller to accommodate slider
             )
             
             st.plotly_chart(fig, use_container_width=True)
