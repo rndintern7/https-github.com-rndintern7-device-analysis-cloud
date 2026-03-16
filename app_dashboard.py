@@ -33,7 +33,7 @@ def load_and_clean_data(file):
 col_title, col_logo = st.columns([8, 2])
 with col_title:
     st.title("Device Analysis System")
-    st.caption("Specific Device Analytics Dashboard")
+    st.caption("Precision Stability Analytics")
 
 with col_logo:
     if logo_base64:
@@ -58,7 +58,6 @@ if uploaded_file is not None:
         "P1": "#A64DFF", "P2": "#D9B3FF"
     }
 
-    # Parameters
     mupt_plot_only = ["C1 Measurement", "C2 Measurement", "T1 Measurement", "T2 Measurement",
                       "Trap Mode", "Bypass Mode", "Solenoid Status", "Steam Leak",
                       "Water Log/Process Off", "Cooling Cycle Switch"]
@@ -69,12 +68,9 @@ if uploaded_file is not None:
     found_mtrol = [p for p in mtrol_targets if p in cols]
 
     # --- DYNAMIC DEVICE DETECTION ---
-    # Customize this logic based on how your headers differ between Mtrol 3 and 4
     if found_mtrol:
-        # Example logic: if a specific column exists for 4, use 4, else 3
-        if "Device ID" in cols and "Mtrol 4" in str(df["Device ID"].iloc[0]):
-            device_name = "Mtrol 4"
-        elif "MT4" in uploaded_file.name: # Or check file name
+        # Detect Mtrol 4 vs 3 based on common header patterns or file name
+        if "MT4" in uploaded_file.name.upper() or "DeviceID" in cols:
             device_name = "Mtrol 4"
         else:
             device_name = "Mtrol 3"
@@ -101,7 +97,8 @@ if uploaded_file is not None:
             target_temp = st.sidebar.slider("Target Chamber Temp (°C)", -40.0, 100.0, 70.0, 0.5)
             tol = st.sidebar.slider("Tolerance (+/- °C)", 0.1, 10.0, 1.0)
             df_filtered = df[(df[temp_target] >= target_temp - tol) & (df[temp_target] <= target_temp + tol)].copy()
-            filter_text = f"Temp: {target_temp}C +/-{tol}C"
+            # Updated with Degree Symbol and Tolerance text
+            filter_text = f"Temp: {target_temp}°C | Tolerance: ±{tol}°C"
         else:
             mupt_slider_targets = ["C1 Measurement", "C2 Measurement", "T1 Measurement", "T2 Measurement"]
             found_sliders = [p for p in mupt_slider_targets if p in cols]
@@ -145,13 +142,13 @@ if uploaded_file is not None:
                 plot_bgcolor=bg_color, paper_bgcolor=bg_color,
                 height=600,
                 annotations=[{
-                    "x": 1, "y": 1.1, 
+                    "x": 1, "y": 1.12, 
                     "xref": "paper", "yref": "paper",
                     "text": f"Device: {device_name} | Filter: {filter_text}",
                     "showarrow": False,
-                    "font": {"size": 12, "color": "white"},
-                    "bgcolor": "rgba(50,50,50,0.8)",
-                    "bordercolor": grid_color,
+                    "font": {"size": 13, "color": "white", "family": "Arial"},
+                    "bgcolor": "rgba(49, 51, 63, 0.9)",
+                    "bordercolor": "#FF4B4B",
                     "borderwidth": 1,
                     "align": "right"
                 }]
@@ -159,7 +156,7 @@ if uploaded_file is not None:
             
             st.plotly_chart(fig, use_container_width=True)
 
-            # STATISTICS
+            # --- STATISTICS ---
             st.markdown("### 📊 Statistics Summary")
             c1, c2, c3 = st.columns(3)
             if is_numeric and mean_val != 0:
