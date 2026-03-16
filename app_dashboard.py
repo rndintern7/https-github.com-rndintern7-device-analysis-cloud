@@ -22,7 +22,7 @@ logo_base64 = get_base64_image("logo.png")
 col_title, col_logo = st.columns([8, 2])
 with col_title:
     st.title("Device Analysis System")
-    st.caption("Mtrol Analysis: Temperature-Based Stability Filtering")
+    st.caption("Stability Analysis with Time-Series Graphing")
 
 with col_logo:
     if logo_base64:
@@ -44,21 +44,21 @@ if uploaded_file is not None:
         "P1": "#ff7f0e", "P2": "#ffb74d"
     }
 
-    # 4. PARAMETER DETECTION
+    # 4. PARAMETER & TIME DETECTION
     mupt_targets = ["C1 Measurement", "C2 Measurement", "T1 Measurement", "T2 Measurement"]
     mtrol_targets = ["Flow Rate", "% Opening", "P1", "P2"]
     temp_target = "Chamber Temperature (°C)"
     
+    # Detect Time Column (Mtrol uses "Time Stamp", MUPT uses "Timestamp")
+    time_col = next((c for c in cols if "time" in c.lower()), None)
+    
     found_mupt = [p for p in mupt_targets if p in cols]
     found_mtrol = [p for p in mtrol_targets if p in cols]
-    
-    # Check if this is an Mtrol file based on existing columns
     is_mtrol = len(found_mtrol) > 0
 
     st.sidebar.markdown("---")
     st.sidebar.header("⚙️ Analysis Settings")
     
-    # Selection for what to plot
     all_found = found_mupt + found_mtrol
     if not all_found:
         st.error("⚠️ No target parameters found in CSV.")
@@ -71,33 +71,37 @@ if uploaded_file is not None:
         df_filtered = df.copy()
 
         if is_mtrol and temp_target in cols:
-            # MTROL ONLY: Temperature & Tolerance (Replacing individual sliders)
             target_temp = st.sidebar.slider("Target Chamber Temp (°C)", -40.0, 100.0, 70.0, 0.5)
             tol = st.sidebar.slider("Tolerance (+/- °C)", 0.1, 10.0, 1.0)
-            
             df_filtered = df_filtered[
                 (df_filtered[temp_target] >= target_temp - tol) & 
                 (df_filtered[temp_target] <= target_temp + tol)
             ]
-            st.sidebar.info(f"Showing data where Temp is {target_temp}°C ± {tol}°C")
-        
         elif not is_mtrol:
-            # MUPT ONLY: Keep parameter sliders for C1/C2 etc.
             for p in found_mupt:
                 min_v, max_v = float(df[p].min()), float(df[p].max())
                 r = st.sidebar.slider(f"Filter {p}", min_v, max_v, (min_v, max_v))
                 df_filtered = df_filtered[(df_filtered[p] >= r[0]) & (df_filtered[p] <= r[1])]
 
         if not df_filtered.empty:
-            # 6. CALCULATIONS
+            # 6. TIME CONVERSION
+            if time_col:
+                df_filtered[time_col] = pd.to_datetime(df_filtered[time_col])
+                x_axis_data = df_filtered[time_col]
+                x_label = "Time Stamp"
+            else:
+                x_axis_data = list(range(1, len(df_filtered) + 1))
+                x_label = "Sequence Index (Time column not found)"
+
+            # CALCULATIONS
             mean_val = df_filtered[plot_col].mean()
             df_filtered['PPM'] = ((df_filtered[plot_col] - mean_val) / mean_val * 1_000_000) if mean_val != 0 else 0
 
-            # --- 7. GRAPH ---
+            # --- 7. GRAPH (Timestamp X-Axis) ---
             selected_color = color_map.get(plot_col, "#1f77b4")
             fig = go.Figure()
             fig.add_trace(go.Scatter(
-                x=list(range(1, len(df_filtered) + 1)), 
+                x=x_axis_data, 
                 y=df_filtered['PPM'], 
                 mode='lines+markers',
                 marker=dict(
@@ -111,8 +115,8 @@ if uploaded_file is not None:
             ))
             
             fig.update_layout(
-                title=f"<b>Stability Analysis: {plot_col}</b>",
-                xaxis=dict(title="Sequence Index (Filtered Points)", rangeslider=dict(visible=True)),
+                title=f"<b>{plot_col} Stability Over Time</b>",
+                xaxis=dict(title=x_label, rangeslider=dict(visible=True)),
                 yaxis=dict(title="PPM Deviation"),
                 template="plotly_white",
                 height=550
@@ -128,11 +132,11 @@ if uploaded_file is not None:
 
             # --- 9. DATA TABLE ---
             st.subheader("📋 Filtered Results")
-            display_cols = all_found + ( [temp_target] if temp_target in cols else [] ) + ['PPM']
+            display_cols = ([time_col] if time_col else []) + all_found + ( [temp_target] if temp_target in cols else [] ) + ['PPM']
             st.dataframe(df_filtered[display_cols], use_container_width=True)
 
         else:
-            st.warning("⚠️ No data matches the selected Temperature range.")
+            st.warning("⚠️ No data matches the selected filter range.")
 
 else:
-    st.info("👋 Upload an Mtrol CSV to filter by Chamber Temperature and Tolerance.")
+    st.info("👋 Upload a CSV file. The app will automatically map the Time Stamp from your file to the X-axis.")
