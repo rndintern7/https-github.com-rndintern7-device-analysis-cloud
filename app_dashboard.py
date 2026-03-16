@@ -22,7 +22,7 @@ logo_base64 = get_base64_image("logo.png")
 col_title, col_logo = st.columns([8, 2])
 with col_title:
     st.title("Device Analysis System")
-    st.caption("Upload your CSV and select product mode for specific parameter analysis.")
+    st.caption("Cloud Analytics: Upload any CSV for automatic parameter detection.")
 
 with col_logo:
     if logo_base64:
@@ -34,49 +34,50 @@ uploaded_file = st.sidebar.file_uploader("Upload your Dataset (CSV)", type=["csv
 
 if uploaded_file is not None:
     df = pd.read_csv(uploaded_file)
+    cols = df.columns.tolist()
     
-    # 3. DEVICE SELECTION
-    st.sidebar.markdown("---")
-    st.sidebar.header("⚙️ Device Mode")
-    device = st.sidebar.selectbox("Select Product", ["Mtrol 3", "Mtrol 4", "MUPT"])
-
-    # Define Parameters based on your requirements
-    if device == "MUPT":
-        target_params = ["C1 Measurement", "C2 Measurement", "T1 Measurement", "T2 Measurement"]
-    else:
-        # For Mtrol 3 & 4
-        target_params = ["Flow Rate", "% Opening", "P1", "P2"]
-
-    # Only show parameters that actually exist in the uploaded CSV
-    available_params = [p for p in target_params if p in df.columns]
+    # 3. AUTOMATIC PARAMETER DETECTION
+    # Define all possible target parameters
+    mupt_targets = ["C1 Measurement", "C2 Measurement", "T1 Measurement", "T2 Measurement"]
+    mtrol_targets = ["Flow Rate", "% Opening", "P1", "P2"]
     
-    if not available_params:
-        st.error(f"⚠️ None of the required parameters for {device} were found in the CSV. Please check your headers.")
-    else:
-        plot_col = st.sidebar.selectbox("Select Parameter to Analyze", available_params)
+    # Check which ones exist in the file
+    found_mupt = [p for p in mupt_targets if p in cols]
+    found_mtrol = [p for p in mtrol_targets if p in cols]
+    
+    # Combine all found parameters for selection
+    all_found = found_mupt + found_mtrol
 
-        # 4. DYNAMIC SLIDER FILTERS
+    if not all_found:
+        st.error("⚠️ No standard parameters (C1, T1, Flow Rate, etc.) found in this CSV. Please check headers.")
+    else:
+        st.sidebar.markdown("---")
+        st.sidebar.header("⚙️ Analysis Settings")
+        
+        # User chooses which parameter to graph
+        plot_col = st.sidebar.selectbox("Select Parameter to Analyze", all_found)
+
+        # 4. DYNAMIC SLIDER FILTERS (Only for detected parameters)
         st.sidebar.markdown("---")
         st.sidebar.subheader("🎯 Data Filters")
         
         df_filtered = df.copy()
         
-        # Create sliders for all target parameters for that device
-        for p in available_params:
+        for p in all_found:
             min_v, max_v = float(df[p].min()), float(df[p].max())
-            # Default to full range
+            # Add sliders for every relevant parameter found in the file
             r = st.sidebar.slider(f"Filter {p}", min_v, max_v, (min_v, max_v))
             df_filtered = df_filtered[(df_filtered[p] >= r[0]) & (df_filtered[p] <= r[1])]
 
         if not df_filtered.empty:
-            # 5. CALCULATIONS (Using Index for X-axis instead of Time)
+            # 5. CALCULATIONS
             mean_val = df_filtered[plot_col].mean()
             df_filtered['PPM'] = ((df_filtered[plot_col] - mean_val) / mean_val * 1_000_000) if mean_val != 0 else 0
 
-            # --- 6. GRAPH (X-axis is now Data Points/Index) ---
+            # --- 6. GRAPH (Sequence Index X-Axis) ---
             fig = go.Figure()
             fig.add_trace(go.Scatter(
-                x=list(range(len(df_filtered))), # Removed Time, using sequence index
+                x=list(range(1, len(df_filtered) + 1)), 
                 y=df_filtered['PPM'], 
                 mode='lines+markers', 
                 line=dict(color="#1f77b4", width=2),
@@ -84,8 +85,8 @@ if uploaded_file is not None:
             ))
             
             fig.update_layout(
-                title=f"<b>{device} Stability: {plot_col}</b>",
-                xaxis=dict(title="Data Point Index", rangeslider=dict(visible=True)),
+                title=f"<b>Stability Analysis: {plot_col}</b>",
+                xaxis=dict(title="Sequence Index (Data Points)", rangeslider=dict(visible=True)),
                 yaxis=dict(title="PPM Deviation"),
                 template="plotly_white",
                 height=550
@@ -101,12 +102,11 @@ if uploaded_file is not None:
 
             # --- 8. DATA TABLE ---
             st.subheader("📋 Filtered Results")
-            # Only show relevant columns in table
-            table_cols = available_params + ['PPM']
+            table_cols = all_found + ['PPM']
             st.dataframe(df_filtered[table_cols], use_container_width=True, hide_index=False)
 
         else:
-            st.warning("No data found for the selected filter ranges.")
+            st.warning("No data matches the selected filter ranges.")
 
 else:
-    st.info("👋 Welcome! Please upload your CSV file in the sidebar to begin.")
+    st.info("👋 Welcome! Please upload your CSV file in the sidebar to begin. The system will automatically detect if it is an Mtrol or MUPT dataset.")
