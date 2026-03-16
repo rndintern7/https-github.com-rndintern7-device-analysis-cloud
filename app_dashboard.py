@@ -26,13 +26,15 @@ def load_and_clean_data(file):
     time_col = next((c for c in df.columns if "time" in c.lower()), None)
     if time_col:
         df[time_col] = pd.to_datetime(df[time_col], errors='coerce')
+        # Sort by time to prevent "zigzag" lines
+        df = df.sort_values(by=time_col)
     return df, time_col
 
 # --- HEADER ---
 col_title, col_logo = st.columns([8, 2])
 with col_title:
     st.title("Device Analysis System")
-    st.caption("Performance Optimized with Unique Parameter Coloring")
+    st.caption("Stability Analysis: Continuous Visualization Mode")
 
 with col_logo:
     if logo_base64:
@@ -46,12 +48,11 @@ if uploaded_file is not None:
     df, time_col = load_and_clean_data(uploaded_file)
     cols = df.columns.tolist()
     
-    # --- UNIQUE COLOR MAPPING ---
     color_map = {
-        "C1 Measurement": "#1f77b4", "C2 Measurement": "#42a5f5", # Blues
-        "T1 Measurement": "#2ca02c", "T2 Measurement": "#66bb6a", # Greens
-        "Flow Rate": "#d62728", "% Opening": "#ef5350",           # Reds
-        "P1": "#ff7f0e", "P2": "#ffb74d"                          # Oranges
+        "C1 Measurement": "#1f77b4", "C2 Measurement": "#42a5f5",
+        "T1 Measurement": "#2ca02c", "T2 Measurement": "#66bb6a",
+        "Flow Rate": "#d62728", "% Opening": "#ef5350",
+        "P1": "#ff7f0e", "P2": "#ffb74d"
     }
 
     mupt_targets = ["C1 Measurement", "C2 Measurement", "T1 Measurement", "T2 Measurement"]
@@ -67,7 +68,7 @@ if uploaded_file is not None:
     st.sidebar.header("⚙️ Analysis Settings")
     
     if not all_found:
-        st.error("⚠️ No target parameters found in CSV.")
+        st.error("⚠️ No target parameters found.")
     else:
         plot_col = st.sidebar.selectbox("Select Parameter to Analyze", all_found)
 
@@ -96,7 +97,7 @@ if uploaded_file is not None:
             mean_val = df_filtered[plot_col].mean()
             df_filtered['PPM'] = ((df_filtered[plot_col] - mean_val) / mean_val * 1_000_000) if mean_val != 0 else 0
 
-            # --- 6. OPTIMIZED & COLORED GRAPH ---
+            # --- 6. CONTINUOUS GRAPH (No White Patches) ---
             selected_color = color_map.get(plot_col, "#1f77b4")
             
             fig = go.Figure()
@@ -104,22 +105,35 @@ if uploaded_file is not None:
                 x=df_filtered[time_col] if time_col else list(range(len(df_filtered))), 
                 y=df_filtered['PPM'], 
                 mode='lines+markers',
+                # connectgaps=True removes the "white patches" by drawing a line between points
+                connectgaps=True, 
                 marker=dict(
-                    color=df_filtered['PPM'],
-                    colorscale=[[0, 'rgba(230,230,230,0.5)'], [1, selected_color]], # Value-based gradient
-                    size=7,
-                    showscale=False
+                    color=selected_color, 
+                    size=5,
+                    opacity=0.7
                 ),
-                line=dict(color=selected_color, width=1.5),
+                line=dict(color=selected_color, width=2),
                 name=plot_col
             ))
             
             fig.update_layout(
                 title=f"<b>{plot_col} Stability Analysis</b>",
-                xaxis=dict(title="Time Stamp" if time_col else "Index", rangeslider=dict(visible=True)),
-                yaxis=dict(title="PPM Deviation"),
+                xaxis=dict(
+                    title="Time Stamp" if time_col else "Index",
+                    rangeslider=dict(visible=True),
+                    showgrid=True,
+                    gridcolor='rgba(230,230,230,0.5)'
+                ),
+                yaxis=dict(
+                    title="PPM Deviation",
+                    showgrid=True,
+                    gridcolor='rgba(230,230,230,0.5)'
+                ),
                 template="plotly_white",
-                height=550
+                height=550,
+                # Force plot background to be solid white to hide artifacts
+                plot_bgcolor="white",
+                paper_bgcolor="white"
             )
             st.plotly_chart(fig, use_container_width=True)
 
