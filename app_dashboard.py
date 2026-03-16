@@ -9,6 +9,10 @@ st.set_page_config(page_title="Mtrol Precision Analytics", layout="wide")
 
 # --- Function to fetch Standard Values based on Device and Parameter ---
 def get_mtrol_standards(device_name, parameter_name):
+    """
+    Fetches the Minimum and Maximum standard values for a given parameter from the uploaded 
+    standard reference CSV files for Mtrol 3 or Mtrol 4.
+    """
     file_map = {
         "Mtrol 3": "Standard Values 11-13 March - For Mtrol 3 Input.csv",
         "Mtrol 4": "Standard Values 11-13 March - For Mtrol 4 Input.csv"
@@ -36,7 +40,7 @@ def load_and_clean_data(file):
 
 # --- HEADER ---
 st.title("Mtrol Precision Analytics")
-st.caption("Standardized PPM Formula Engine with Temperature Correlation")
+st.caption("Standardized PPM Formula Engine - Full Cycle Analysis")
 
 # --- DATA SOURCE ---
 st.sidebar.header("📂 Data Source")
@@ -54,22 +58,15 @@ if uploaded_file is not None:
     mtrol_params = ["Flow Rate", "% Opening", "P1", "P2"]
     temp_target = "Chamber Temperature (°C)"
     
+    # Device Identification Logic
     device_name = "Mtrol 4" if "MT4" in uploaded_file.name.upper() else "Mtrol 3"
     st.sidebar.success(f"Mode: {device_name}")
 
     plot_col = st.sidebar.selectbox("Select Parameter", [c for c in mtrol_params if c in cols])
 
-    # --- FILTERS ---
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("🎯 Temperature Filter")
+    # No temperature slider as requested - analyzing the complete cycle
     df_filtered = df.copy()
-    filter_text = "All Data"
-
-    if temp_target in cols:
-        target_temp = st.sidebar.slider("Target Temp (°C)", -40.0, 100.0, 70.0, 0.5)
-        tol = st.sidebar.slider("Tolerance (+/- °C)", 0.1, 10.0, 1.0)
-        df_filtered = df[(df[temp_target] >= target_temp - tol) & (df[temp_target] <= target_temp + tol)].copy()
-        filter_text = f"Temp: {target_temp}°C | Tolerance: ±{tol}°C"
+    filter_text = "Full Cycle Data"
 
     if not df_filtered.empty:
         # --- CALCULATIONS ---
@@ -80,7 +77,10 @@ if uploaded_file is not None:
         std_min, std_max = get_mtrol_standards(device_name, plot_col)
 
         if std_min is not None and std_max is not None and temp_target in cols:
+            # 1. Input Min/Max from full cycle data
             input_max, input_min = df_filtered[plot_col].max(), df_filtered[plot_col].min()
+            
+            # 2. Chamber Temp Min/Max from full cycle data
             temp_max, temp_min = df_filtered[temp_target].max(), df_filtered[temp_target].min()
             
             temp_range = temp_max - temp_min
@@ -90,7 +90,7 @@ if uploaded_file is not None:
                 # Formula: PPM = ([Max In - Min In] * 1,000,000) / ([Max Temp - Min Temp] * [Std Max - Std Min])
                 formula_ppm = ((input_max - input_min) * 1000000) / (temp_range * std_range)
 
-        # PPM Deviation for Graphing
+        # PPM Deviation for Graphing (Relative to full cycle average)
         if is_numeric and param_avg != 0:
             df_filtered['PPM_Dev'] = ((df_filtered[plot_col] - param_avg) / param_avg * 1_000_000)
 
@@ -120,7 +120,7 @@ if uploaded_file is not None:
 
         fig.update_layout(
             template="plotly_dark", height=600,
-            title=f"<b>{plot_col} Stability vs Temperature</b>",
+            title=f"<b>{plot_col} Stability vs Temperature (Full Cycle)</b>",
             xaxis=dict(title="Timestamp", rangeslider=dict(visible=True, thickness=0.05)),
             yaxis=dict(title="PPM Deviation (Stability)"),
             yaxis2=dict(title="Temperature (°C)", overlaying='y', side='right'),
@@ -135,16 +135,16 @@ if uploaded_file is not None:
         st.plotly_chart(fig, use_container_width=True)
 
         # --- STATISTICS ---
-        st.markdown("### 📊 Metrics Summary")
+        st.markdown("### 📊 Metrics Summary (Full Cycle)")
         m1, m2, m3 = st.columns(3)
         m1.metric(f"Avg {plot_col}", f"{param_avg:.4f}")
         m2.metric("Calculated PPM (Formula)", f"{formula_ppm:.2f}")
-        m3.info(f"Ref Standard: {std_min} to {std_max}")
+        m3.info(f"Ref Standard Range: {std_min} to {std_max}") #
 
         # --- DATA TABLE ---
-        st.markdown("### 📋 Filtered Data")
+        st.markdown("### 📋 Cycle Data")
         df_display = df_filtered.copy()
         df_display.insert(0, 'S.No.', range(1, len(df_display) + 1))
-        st.dataframe(df_display.head(1000), use_container_width=True, hide_index=True)
+        st.dataframe(df_display.head(5000), use_container_width=True, hide_index=True)
     else:
-        st.warning("No data found for the selected temperature range.")
+        st.warning("The dataset is empty. Please upload a valid CSV file.")
