@@ -8,138 +8,161 @@ import re
 # 1. Page Config
 st.set_page_config(page_title="Mtrol Precision Analytics", layout="wide")
 
-# --- Improved Function to fetch Standard Values ---
+# --- SMART FILE & STANDARD LOOKUP ---
 def get_mtrol_standards(device_name, parameter_name):
-    file_map = {
-        "Mtrol 3": "Standard Values 11-13 March - For Mtrol 3 Input.csv",
-        "Mtrol 4": "Standard Values 11-13 March - For Mtrol 4 Input.csv"
-    }
-    try:
-        if device_name in file_map and os.path.exists(file_map[device_name]):
-            std_df = pd.read_csv(file_map[device_name])
-            # Use regex to find parameter (e.g., search for "P1" in "P1 (bar)")
-            search_key = parameter_name.split(' ')[0].split('(')[0].strip()
-            match = std_df[std_df['Parameters'].str.contains(search_key, case=False, na=False)]
+    """
+    Automatically finds the standard reference CSVs in the GitHub repo 
+    and matches the selected parameter.
+    """
+    all_files = os.listdir('.')
+    std_files = [f for f in all_files if "standard" in f.lower() and "values" in f.lower() and f.endswith(".csv")]
+    
+    # Identify if we need Mtrol 3 or 4 standards
+    target_keyword = "Mtrol 3" if "3" in device_name else "Mtrol 4"
+    target_file = next((f for f in std_files if target_keyword.lower() in f.lower()), None)
+    
+    # Fallback to any available standard file
+    if not target_file and std_files:
+        target_file = std_files[0]
+
+    if target_file:
+        try:
+            std_df = pd.read_csv(target_file)
+            # Normalize names: remove symbols, spaces, and units for matching
+            def normalize(s): return re.sub(r'[^a-z0-9%]', '', str(s).lower())
             
-            if not match.empty:
-                return float(match.iloc[0]['Minimum Value']), float(match.iloc[0]['Maximum Value'])
-    except Exception as e:
-        st.error(f"Error reading standards for {parameter_name}: {e}")
+            search_key = normalize(parameter_name.split(' ')[0])
+            for idx, row in std_df.iterrows():
+                if search_key in normalize(row['Parameters']):
+                    return float(row['Minimum Value']), float(row['Maximum Value'])
+        except Exception:
+            pass
     return None, None
 
-# --- Advanced Numeric Cleaning Function ---
-def clean_numeric_series(series):
-    # 1. Convert to string and strip whitespace
-    s = series.astype(str).str.strip()
-    # 2. Remove percentage signs, commas, and other non-numeric chars (except dots and minus)
-    s = s.str.replace(r'[^\d\.\-]', '', regex=True)
-    # 3. Convert to numeric, turning failures into NaN
-    return pd.to_numeric(s, errors='coerce')
-
-# --- Cached Data Loading with Aggressive Cleaning ---
+# --- AGGRESSIVE DATA CLEANING ---
 @st.cache_data
 def load_and_clean_data(file):
     df = pd.read_csv(file)
     
-    # Identify time column
+    # 1. Handle Time
     time_col = next((c for c in df.columns if "time" in c.lower()), None)
     if time_col:
         df[time_col] = pd.to_datetime(df[time_col], errors='coerce')
         df = df.sort_values(by=time_col).dropna(subset=[time_col])
     
-    # Target columns to clean specifically
-    targets = ["flow", "opening", "p1", "p2", "temperature", "temp"]
-    
+    # 2. Clean numeric columns (removes '%', ',', and spaces)
+    targets = ["flow", "opening", "p1", "p2", "temp", "chamber"]
     for col in df.columns:
-        if col != time_col:
-            # If the column name matches our target keywords, force clean it
-            if any(t in col.lower() for t in targets):
-                df[col] = clean_numeric_series(df[col])
-            else:
-                # Try soft conversion for others
-                df[col] = pd.to_numeric(df[col], errors='ignore')
+        if col != time_col and any(t in col.lower() for t in targets):
+            # Regex removes anything that isn't a digit, dot, or minus sign
+            df[col] = pd.to_numeric(df[col].astype(str).str.replace(r'[^\d\.\-]', '', regex=True), errors='coerce')
     
     return df, time_col
 
 # --- HEADER ---
 st.title("Mtrol Precision Analytics")
-st.caption("Robust Cumulative Stability Engine - Optimized for Dirty Data")
+st.caption("Standardized PPM Stability Dashboard | Dual-Axis Temperature Correlation")
 
-# --- DATA SOURCE ---
+# --- SIDEBAR & SYSTEM HEALTH ---
 st.sidebar.header("📂 Data Source")
 uploaded_file = st.sidebar.file_uploader("Upload Mtrol Dataset (CSV)", type=["csv"])
+
+# Check if Standard CSVs exist in the GitHub Repo
+all_files = os.listdir('.')
+has_std3 = any("mtrol 3" in f.lower() and "standard" in f.lower() for f in all_files)
+has_std4 = any("mtrol 4" in f.lower() and "standard" in f.lower() for f in all_files)
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("Reference Standards Status")
+st.sidebar.write(f"{'✅' if has_std3 else '❌'} Mtrol 3 Standards")
+st.sidebar.write(f"{'✅' if has_std4 else '❌'} Mtrol 4 Standards")
 
 if uploaded_file is not None:
     df, time_col = load_and_clean_data(uploaded_file)
     cols = df.columns.tolist()
     
-    mtrol_targets = ["Flow Rate", "% Opening", "P1", "P2"]
-    temp_target_name = "Chamber Temperature"
+    # Identify key columns in the uploaded file
+    # We look for 'chamber' + 'temp' for the temperature axis
+    temp_col = next((c for c in cols if "chamber" in c.lower() and "temp" in c.lower()), None)
+    # Filter for P1, P2, Flow, and Opening
+    available_params = [c for c in cols if any(t.lower() in c.lower() for t in ["flow", "opening", "p1", "p2"])]
     
-    actual_temp_col = next((c for c in cols if temp_target_name.lower() in c.lower()), None)
-    
-    available_mtrol_cols = []
-    for target in mtrol_targets:
-        match = [c for c in cols if target.lower() in c.lower()]
-        available_mtrol_cols.extend(match)
-    
+    # Device Mode Detection
     device_name = "Mtrol 4" if "MT4" in uploaded_file.name.upper() else "Mtrol 3"
-    st.sidebar.success(f"Detected: {device_name}")
+    st.sidebar.success(f"Mode: {device_name}")
 
-    if not available_mtrol_cols:
-        st.error("❌ No Mtrol parameters found. Check your CSV column names.")
+    if not available_params:
+        st.error("❌ No valid Mtrol parameters (P1, P2, Flow, Opening) found in CSV.")
+    elif not temp_col:
+        st.error("❌ 'Chamber Temperature' column not found. Please check your CSV column headers.")
     else:
-        plot_col = st.sidebar.selectbox("Select Parameter", available_mtrol_cols)
+        plot_col = st.sidebar.selectbox("Select Parameter to Analyze", available_params)
+        
+        # --- CALCULATION ENGINE ---
+        std_min, std_max = get_mtrol_standards(device_name, plot_col)
 
-        # Final check if data is numeric after cleaning
-        if actual_temp_col and pd.api.types.is_numeric_dtype(df[plot_col]):
-            std_min, std_max = get_mtrol_standards(device_name, plot_col)
+        if std_min is not None and std_max is not None:
+            # Clean up rows with missing values
+            valid_df = df[[time_col, plot_col, temp_col]].dropna().copy()
+            
+            # 1. Get Expanding (Cumulative) Max and Min
+            # This ensures the line is a steady "Stability" trend rather than noisy spikes
+            in_max, in_min = valid_df[plot_col].expanding().max(), valid_df[plot_col].expanding().min()
+            t_max, t_min = valid_df[temp_col].expanding().max(), valid_df[temp_col].expanding().min()
+            
+            # 2. Apply Formula: PPM = (ΔInput * 1,000,000) / (ΔTemp * ΔRef_Standard)
+            std_range = std_max - std_min
+            t_delta = (t_max - t_min)
+            in_delta = (in_max - in_min)
+            
+            valid_df['Stability_PPM'] = (in_delta * 1000000) / (t_delta * std_range)
+            
+            # Clean up infinity errors at the very start of the cycle
+            valid_df['Stability_PPM'] = valid_df['Stability_PPM'].replace([float('inf'), -float('inf')], 0).fillna(0)
 
-            if std_min is not None and std_max is not None:
-                std_range = std_max - std_min
-                
-                # Formula inputs
-                # Using fillna(method='ffill') to handle any scattered NaNs from cleaning
-                clean_param = df[plot_col].fillna(method='ffill')
-                clean_temp = df[actual_temp_col].fillna(method='ffill')
+            # --- DUAL AXIS PLOT ---
+            fig = make_subplots(specs=[[{"secondary_y": True}]])
 
-                exp_input_max = clean_param.expanding().max()
-                exp_input_min = clean_param.expanding().min()
-                exp_temp_max = clean_temp.expanding().max()
-                exp_temp_min = clean_temp.expanding().min()
-                
-                input_delta = exp_input_max - exp_input_min
-                temp_delta = exp_temp_max - exp_temp_min
-                
-                # PPM = ([MaxIn - MinIn] * 1,000,000) / ([MaxTemp - MinTemp] * [StdMax - StdMin])
-                df['Cumulative_PPM'] = (input_delta * 1000000) / (temp_delta * std_range)
-                df['Cumulative_PPM'] = df['Cumulative_PPM'].replace([float('inf'), -float('inf')], 0).fillna(0)
+            # Left Axis: PPM Stability
+            fig.add_trace(
+                go.Scattergl(
+                    x=valid_df[time_col], y=valid_df['Stability_PPM'], 
+                    name="Stability Index (PPM)", 
+                    line=dict(color="#00CCFF", width=2.5)
+                ),
+                secondary_y=False,
+            )
 
-                final_ppm = df['Cumulative_PPM'].iloc[-1]
+            # Right Axis: Chamber Temperature
+            fig.add_trace(
+                go.Scattergl(
+                    x=valid_df[time_col], y=valid_df[temp_col], 
+                    name="Chamber Temp (°C)", 
+                    line=dict(color="#00FF99", width=1, dash='dot')
+                ),
+                secondary_y=True,
+            )
 
-                # --- PLOT ---
-                fig = make_subplots(specs=[[{"secondary_y": True}]])
-                fig.add_trace(go.Scattergl(x=df[time_col], y=df['Cumulative_PPM'], 
-                                         name="Stability Index (PPM)", line=dict(color="#00CCFF", width=2.5)), secondary_y=False)
-                fig.add_trace(go.Scattergl(x=df[time_col], y=df[actual_temp_col], 
-                                         name="Temp (°C)", line=dict(color="#00FF99", width=1, dash='dot')), secondary_y=True)
+            fig.update_layout(
+                template="plotly_dark", height=650,
+                title=f"<b>Cycle Stability Trend: {plot_col} vs Temperature</b>",
+                xaxis=dict(title="Cycle Timeline", rangeslider=dict(visible=True, thickness=0.05)),
+                yaxis=dict(title="PPM Stability Index (Lower is Better)", gridcolor="#333"),
+                yaxis2=dict(title="Temperature (°C)", side='right', gridcolor="#111"),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            )
+            st.plotly_chart(fig, use_container_width=True)
 
-                fig.update_layout(template="plotly_dark", height=600,
-                                title=f"<b>{plot_col} Full Cycle Stability</b>",
-                                xaxis=dict(rangeslider=dict(visible=True, thickness=0.05)),
-                                yaxis=dict(title="PPM Stability Index"),
-                                yaxis2=dict(title="Temperature (°C)", overlaying='y', side='right'))
-                st.plotly_chart(fig, use_container_width=True)
-
-                # --- METRICS ---
-                m1, m2, m3 = st.columns(3)
-                m1.metric("Final Cycle PPM", f"{final_ppm:.2f}")
-                m2.metric(f"Avg {plot_col}", f"{clean_param.mean():.4f}")
-                m3.info(f"Using Standards: {std_min} to {std_max}")
-            else:
-                st.error(f"❌ Standard values for '{plot_col}' not found.")
+            # --- SUMMARY METRICS ---
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Final Cycle PPM", f"{valid_df['Stability_PPM'].iloc[-1]:.2f}")
+            m2.metric(f"Avg {plot_col}", f"{valid_df[plot_col].mean():.4f}")
+            m3.info(f"Ref Standards: {std_min} to {std_max}")
+            
+            # --- DATA TABLE ---
+            st.markdown("### 📋 Cycle Data Points")
+            df_display = valid_df.copy()
+            df_display.insert(0, 'S.No.', range(1, len(df_display) + 1))
+            st.dataframe(df_display.head(5000), use_container_width=True, hide_index=True)
         else:
-            if not actual_temp_col:
-                st.error("❌ 'Chamber Temperature' column missing.")
-            else:
-                st.error(f"❌ '{plot_col}' is still non-numeric. Please check for text in data cells.")
+            st.error(f"❌ Could not link '{plot_col}' to the Standard Reference CSV. Check that the parameter name in the standard file matches.")
