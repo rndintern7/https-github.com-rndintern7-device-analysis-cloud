@@ -19,37 +19,41 @@ def get_base64_image(image_path):
 
 logo_base64 = get_base64_image("logo.png")
 
-# --- HEADER ---
-col_title, col_logo = st.columns([8, 2])
-with col_title:
-    st.title("Device Analysis System")
-    st.caption("Performance Optimized Cloud Dashboard")
-
-with col_logo:
-    if logo_base64:
-        st.markdown(f'<div style="text-align:right;"><img src="data:image/png;base64,{logo_base64}" style="width:180px;"></div>', unsafe_allow_html=True)
-
 # --- 2. CACHED DATA LOADING ---
 @st.cache_data
 def load_and_clean_data(file):
     df = pd.read_csv(file)
-    # Detect Time Column
     time_col = next((c for c in df.columns if "time" in c.lower()), None)
     if time_col:
-        # Optimization: format='mixed' is much faster for mixed date strings
         df[time_col] = pd.to_datetime(df[time_col], errors='coerce')
     return df, time_col
+
+# --- HEADER ---
+col_title, col_logo = st.columns([8, 2])
+with col_title:
+    st.title("Device Analysis System")
+    st.caption("Performance Optimized with Unique Parameter Coloring")
+
+with col_logo:
+    if logo_base64:
+        st.markdown(f'<div style="text-align:right;"><img src="data:image/png;base64,{logo_base64}" style="width:180px;"></div>', unsafe_allow_html=True)
 
 # --- 3. CLOUD DATA UPLOADER ---
 st.sidebar.header("📂 Data Source")
 uploaded_file = st.sidebar.file_uploader("Upload your Dataset (CSV)", type=["csv"])
 
 if uploaded_file is not None:
-    # Use the cached loader
     df, time_col = load_and_clean_data(uploaded_file)
     cols = df.columns.tolist()
     
-    # Define Targets
+    # --- UNIQUE COLOR MAPPING ---
+    color_map = {
+        "C1 Measurement": "#1f77b4", "C2 Measurement": "#42a5f5", # Blues
+        "T1 Measurement": "#2ca02c", "T2 Measurement": "#66bb6a", # Greens
+        "Flow Rate": "#d62728", "% Opening": "#ef5350",           # Reds
+        "P1": "#ff7f0e", "P2": "#ffb74d"                          # Oranges
+    }
+
     mupt_targets = ["C1 Measurement", "C2 Measurement", "T1 Measurement", "T2 Measurement"]
     mtrol_targets = ["Flow Rate", "% Opening", "P1", "P2"]
     temp_target = "Chamber Temperature (°C)"
@@ -71,7 +75,6 @@ if uploaded_file is not None:
         st.sidebar.markdown("---")
         st.sidebar.subheader("🎯 Data Filters")
         
-        # Performance: Don't copy the whole DF if not needed
         if is_mtrol and temp_target in cols:
             target_temp = st.sidebar.slider("Target Chamber Temp (°C)", -40.0, 100.0, 70.0, 0.5)
             tol = st.sidebar.slider("Tolerance (+/- °C)", 0.1, 10.0, 1.0)
@@ -93,38 +96,43 @@ if uploaded_file is not None:
             mean_val = df_filtered[plot_col].mean()
             df_filtered['PPM'] = ((df_filtered[plot_col] - mean_val) / mean_val * 1_000_000) if mean_val != 0 else 0
 
-            # --- 6. OPTIMIZED GRAPH ---
+            # --- 6. OPTIMIZED & COLORED GRAPH ---
+            selected_color = color_map.get(plot_col, "#1f77b4")
+            
             fig = go.Figure()
-            fig.add_trace(go.Scattergl( # Scattergl is the WebGL version - MUCH FASTER for lag
+            fig.add_trace(go.Scattergl(
                 x=df_filtered[time_col] if time_col else list(range(len(df_filtered))), 
                 y=df_filtered['PPM'], 
                 mode='lines+markers',
-                marker=dict(color="#1f77b4", size=6),
-                line=dict(width=1.5),
+                marker=dict(
+                    color=df_filtered['PPM'],
+                    colorscale=[[0, 'rgba(230,230,230,0.5)'], [1, selected_color]], # Value-based gradient
+                    size=7,
+                    showscale=False
+                ),
+                line=dict(color=selected_color, width=1.5),
                 name=plot_col
             ))
             
             fig.update_layout(
-                title=f"<b>{plot_col} Stability</b>",
-                xaxis=dict(title=time_col if time_col else "Index"),
+                title=f"<b>{plot_col} Stability Analysis</b>",
+                xaxis=dict(title="Time Stamp" if time_col else "Index", rangeslider=dict(visible=True)),
                 yaxis=dict(title="PPM Deviation"),
                 template="plotly_white",
-                height=500,
-                margin=dict(l=20, r=20, t=40, b=20)
+                height=550
             )
-            # Setting use_container_width=True
             st.plotly_chart(fig, use_container_width=True)
 
-            # --- 7. STATISTICS (Metrics are fast) ---
+            # --- 7. STATISTICS ---
             st.markdown("### 📊 Statistics Summary")
             c1, c2, c3 = st.columns(3)
             c1.metric("Mean Value", f"{mean_val:.4f}")
             c2.metric("Peak PPM", f"{df_filtered['PPM'].max():.2f}")
             c3.metric("Min PPM", f"{df_filtered['PPM'].min():.2f}")
 
-            # --- 8. DATA TABLE (Limited View for speed) ---
+            # --- 8. DATA TABLE ---
             st.subheader("📋 Filtered Results")
-            st.dataframe(df_filtered.head(1000), use_container_width=True) # Limit to first 1000 rows for view speed
+            st.dataframe(df_filtered.head(1000), use_container_width=True)
 
         else:
             st.warning("⚠️ No data matches the selected filter range.")
