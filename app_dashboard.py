@@ -33,7 +33,7 @@ def load_and_clean_data(file):
 col_title, col_logo = st.columns([8, 2])
 with col_title:
     st.title("Device Analysis System")
-    st.caption("PPM Stability & Parameter Average Analytics")
+    st.caption("Custom PPM Formula Mode: Mtrol Valve Analysis")
 
 with col_logo:
     if logo_base64:
@@ -67,7 +67,6 @@ if uploaded_file is not None:
     found_mupt = [p for p in mupt_plot_only if p in cols]
     found_mtrol = [p for p in mtrol_targets if p in cols]
 
-    # Device Detection
     if found_mtrol:
         device_name = "Mtrol 4" if "MT4" in uploaded_file.name.upper() else "Mtrol 3"
     else:
@@ -107,19 +106,43 @@ if uploaded_file is not None:
         if not df_filtered.empty:
             # --- 5. CALCULATIONS ---
             is_numeric = pd.api.types.is_numeric_dtype(df_filtered[plot_col])
-            
-            # 1. Parameter Average (Raw Value)
             param_avg = df_filtered[plot_col].mean() if is_numeric else 0
             
-            if is_numeric and param_avg != 0:
-                # 2. PPM Calculation
-                df_filtered['PPM'] = ((df_filtered[plot_col] - param_avg) / param_avg * 1_000_000)
-                # 3. PPM Min/Max
-                ppm_min = df_filtered['PPM'].min()
-                ppm_max = df_filtered['PPM'].max()
+            ppm_min, ppm_max = 0, 0
+            
+            if is_numeric:
+                # NEW FORMULA FOR MTROL % OPENING
+                if device_name in ["Mtrol 3", "Mtrol 4"] and plot_col == "% Opening" and temp_target in cols:
+                    max_valve = df_filtered["% Opening"].max()
+                    min_valve = df_filtered["% Opening"].min()
+                    max_temp = df_filtered[temp_target].max()
+                    min_temp = df_filtered[temp_target].min()
+                    
+                    temp_range = max_temp - min_temp
+                    
+                    # Prevent Division by Zero
+                    if temp_range != 0:
+                        # Applying the formula: PPM = ((MaxValve - MinValve) * 1,000,000) / (TempRange * 100)
+                        calculated_ppm = ((max_valve - min_valve) * 1000000) / (temp_range * 100)
+                        
+                        # In this case, the PPM is a single static value for the selected window.
+                        # To visualize it as a stability line, we show the deviation from current avg.
+                        df_filtered['PPM'] = ((df_filtered[plot_col] - param_avg) / param_avg * 1_000_000) if param_avg != 0 else 0
+                        
+                        # Use the formula result for the Min/Max metrics specifically
+                        ppm_min = calculated_ppm # Displaying the formula result
+                        ppm_max = calculated_ppm
+                    else:
+                        df_filtered['PPM'] = 0
+                
+                # STANDARD LOGIC FOR OTHERS
+                elif param_avg != 0:
+                    df_filtered['PPM'] = ((df_filtered[plot_col] - param_avg) / param_avg * 1_000_000)
+                    ppm_min = df_filtered['PPM'].min()
+                    ppm_max = df_filtered['PPM'].max()
+                
                 y_col, y_label = 'PPM', "PPM Deviation"
             else:
-                ppm_min, ppm_max = 0, 0
                 y_col, y_label = plot_col, "Value/Status"
 
             # --- 6. PLOT ---
@@ -158,20 +181,17 @@ if uploaded_file is not None:
             c1, c2, c3 = st.columns(3)
             
             if is_numeric:
-                # Average of Parameter Selected
                 c1.metric(f"Avg of {plot_col}", f"{param_avg:.4f}")
-                # Min/Max of PPM according to Graph
-                c2.metric("Min PPM (Graph)", f"{ppm_min:.2f}")
-                c3.metric("Max PPM (Graph)", f"{ppm_max:.2f}")
-            else:
-                c1.info("Status-based parameter: Average/PPM not applicable.")
+                
+                if plot_col == "% Opening":
+                    c2.metric("Formula PPM", f"{ppm_min:.2f}")
+                    c3.metric("Valve Range", f"{(max_valve - min_valve):.2f}%")
+                else:
+                    c2.metric("Min PPM (Graph)", f"{ppm_min:.2f}")
+                    c3.metric("Max PPM (Graph)", f"{ppm_max:.2f}")
 
-            # --- 8. DATA TABLE WITH S.No. ---
+            # --- 8. DATA TABLE ---
             st.markdown("---")
-            st.markdown("### 📋 Filtered Data Preview")
             df_display = df_filtered.copy()
             df_display.insert(0, 'S.No.', range(1, len(df_display) + 1))
             st.dataframe(df_display.head(1000), use_container_width=True, hide_index=True)
-
-        else:
-            st.warning("⚠️ No data matches the selected filters.")
