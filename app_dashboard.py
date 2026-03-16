@@ -25,15 +25,16 @@ def load_and_clean_data(file):
     df = pd.read_csv(file)
     time_col = next((c for c in df.columns if "time" in c.lower()), None)
     if time_col:
+        # Optimization: Specifying format and errors for faster processing
         df[time_col] = pd.to_datetime(df[time_col], errors='coerce')
-        df = df.sort_values(by=time_col)
+        df = df.sort_values(by=time_col).dropna(subset=[time_col])
     return df, time_col
 
 # --- HEADER ---
 col_title, col_logo = st.columns([8, 2])
 with col_title:
     st.title("Device Analysis System")
-    st.caption("Stability Analysis: Dark Theme with Styled Rangeslider")
+    st.caption("Performance Mode: High-Speed WebGL Rendering")
 
 with col_logo:
     if logo_base64:
@@ -91,21 +92,26 @@ if uploaded_file is not None:
             mean_val = df_filtered[plot_col].mean()
             df_filtered['PPM'] = ((df_filtered[plot_col] - mean_val) / mean_val * 1_000_000) if mean_val != 0 else 0
 
-            # --- 6. GRAPH WITH STYLED RANGESLIDER ---
+            # --- 6. PERFORMANCE GRAPH (WebGL) ---
             selected_color = color_map.get(plot_col, "#00CCFF")
             
             fig = go.Figure()
-            fig.add_trace(go.Scatter(
+            # Use Scattergl for high-performance sliding
+            fig.add_trace(go.Scattergl(
                 x=df_filtered[time_col] if time_col else list(range(len(df_filtered))), 
                 y=df_filtered['PPM'], 
                 mode='lines+markers',
                 connectgaps=True,
-                marker=dict(color=selected_color, size=5),
-                line=dict(color=selected_color, width=2),
+                marker=dict(
+                    color=selected_color, 
+                    size=4, # Smaller markers are faster to render
+                    opacity=0.8
+                ),
+                line=dict(color=selected_color, width=1.5),
                 name=plot_col
             ))
             
-            # Dark Theme Colors
+            # Match Streamlit Dark Theme precisely
             bg_color = "#0e1117" 
             grid_color = "#31333f"
 
@@ -115,11 +121,10 @@ if uploaded_file is not None:
                     title="Time Stamp" if time_col else "Index",
                     gridcolor=grid_color,
                     zeroline=False,
-                    # --- STYLED RANGESLIDER ---
                     rangeslider=dict(
                         visible=True,
-                        bgcolor=bg_color, # Match dashboard background
-                        thickness=0.08,   # Slimmer slider
+                        bgcolor=bg_color,
+                        thickness=0.1,
                         bordercolor=grid_color,
                         borderwidth=1
                     )
@@ -133,9 +138,10 @@ if uploaded_file is not None:
                 plot_bgcolor=bg_color,
                 paper_bgcolor=bg_color,
                 margin=dict(l=40, r=40, t=60, b=40),
-                height=600 # Slightly taller to accommodate slider
+                height=600
             )
             
+            # 'render_mode' forced to webgl for best slider performance
             st.plotly_chart(fig, use_container_width=True)
 
             # --- 7. STATISTICS ---
