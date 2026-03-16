@@ -10,27 +10,22 @@ st.set_page_config(page_title="Mtrol Precision Analytics", layout="wide")
 
 # --- SIDEBAR LOGO ---
 if os.path.exists("logo.png"):
-    st.sidebar.image("logo.png", use_container_width=True)
+    st.sidebar.image("logo.png", width=None) # Set to None or a fixed pixel size
 else:
     st.sidebar.title("Mtrol Analytics")
 
 # --- SMART STANDARD LOOKUP ---
 def get_mtrol_standards(device_name, parameter_name):
-    # Mapping the files you uploaded to the device names
     file_map = {
         "Mtrol 3": "Standard Values 11-13 March - For Mtrol 3 Input.csv",
         "Mtrol 4": "Standard Values 11-13 March - For Mtrol 4 Input.csv"
     }
-    
     filename = file_map.get(device_name)
-    
     if filename and os.path.exists(filename):
         try:
             std_df = pd.read_csv(filename)
-            # Use regex to find parameter (matches "P1" in "P1 (bar)")
             search_key = parameter_name.split(' ')[0].split('(')[0].strip()
             match = std_df[std_df['Parameters'].str.contains(search_key, case=False, na=False)]
-            
             if not match.empty:
                 return float(match.iloc[0]['Minimum Value']), float(match.iloc[0]['Maximum Value'])
         except Exception:
@@ -46,7 +41,6 @@ def load_and_clean_data(file):
         df[time_col] = pd.to_datetime(df[time_col], errors='coerce')
         df = df.sort_values(by=time_col).dropna(subset=[time_col])
     
-    # Clean numeric data (removes %, commas, etc.)
     targets = ["flow", "opening", "p1", "p2", "temp", "chamber"]
     for col in df.columns:
         if col != time_col and any(t in col.lower() for t in targets):
@@ -60,7 +54,6 @@ st.caption("Standardized PPM Calculation Engine")
 st.sidebar.header("📂 Data Source")
 uploaded_file = st.sidebar.file_uploader("Upload Mtrol Dataset (CSV)", type=["csv"])
 
-# System Health Check in Sidebar
 st.sidebar.markdown("---")
 st.sidebar.subheader("Reference Files Status")
 st.sidebar.write(f"{'✅' if os.path.exists('Standard Values 11-13 March - For Mtrol 3 Input.csv') else '❌'} Mtrol 3 Standards")
@@ -68,12 +61,9 @@ st.sidebar.write(f"{'✅' if os.path.exists('Standard Values 11-13 March - For M
 
 if uploaded_file is not None:
     df, time_col = load_and_clean_data(uploaded_file)
-    
-    # Detection logic
     device_name = "Mtrol 4" if "MT4" in uploaded_file.name.upper() else "Mtrol 3"
     st.sidebar.success(f"Mode: {device_name}")
 
-    # Column identification
     temp_col = next((c for c in df.columns if "chamber" in c.lower() and "temp" in c.lower()), None)
     params = [c for c in df.columns if any(t.lower() in c.lower() for t in ["flow", "opening", "p1", "p2"])]
 
@@ -82,14 +72,13 @@ if uploaded_file is not None:
         std_min, std_max = get_mtrol_standards(device_name, plot_col)
 
         if std_min is not None and std_max is not None:
-            # Formula Logic: PPM = (ΔInput * 1M) / (ΔTemp * ΔStd)
             valid_df = df[[time_col, plot_col, temp_col]].dropna().copy()
             
-            # Use expanding window to prevent spikes
             in_range = valid_df[plot_col].expanding().max() - valid_df[plot_col].expanding().min()
             temp_range = valid_df[temp_col].expanding().max() - valid_df[temp_col].expanding().min()
             std_range = std_max - std_min
             
+            # Avoid division by zero
             valid_df['PPM'] = (in_range * 1000000) / (temp_range * std_range)
             valid_df['PPM'] = valid_df['PPM'].replace([float('inf'), -float('inf')], 0).fillna(0)
 
@@ -101,11 +90,13 @@ if uploaded_file is not None:
             fig.update_layout(template="plotly_dark", height=600, title=f"<b>Cycle Analysis: {plot_col}</b>",
                             xaxis=dict(rangeslider=dict(visible=True, thickness=0.05)),
                             yaxis=dict(title="Calculated PPM"), yaxis2=dict(title="Chamber Temp (°C)", side='right'))
-            st.plotly_chart(fig, use_container_width=True)
+            
+            # This is the line that was crashing (Fixed)
+            st.plotly_chart(fig, width='stretch')
 
             # Final Metric
             st.metric("Final Cycle PPM", f"{valid_df['PPM'].iloc[-1]:.2f}")
         else:
-            st.error(f"Could not find standards for {plot_col} in the uploaded CSVs.")
+            st.error(f"Could not find standards for {plot_col}.")
     else:
-        st.error("Missing Chamber Temperature or Mtrol parameters in uploaded data.")
+        st.error("Missing required columns in uploaded data.")
